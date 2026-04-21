@@ -512,61 +512,15 @@ export const loginUser = async (req, res) => {
     }
 
     const [rows] = await conn.query(
-      "SELECT * FROM usuarios WHERE usuario = ? LIMIT 1",
-      [username]
+      "SELECT * FROM usuarios WHERE usuario = ? AND password = ? LIMIT 1",
+      [username, password]
     );
 
     if (rows.length === 0) {
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
-    const user = rows[0];
-
-    // Detecta si el password almacenado es bcrypt o texto plano (migración automática)
-    const isHashed = user.password.startsWith('$2');
-    let validPassword = false;
-    if (isHashed) {
-      validPassword = await bcrypt.compare(password, user.password);
-    } else {
-      validPassword = user.password === password;
-      if (validPassword) {
-        // Auto-migrar a bcrypt en el primer login exitoso
-        const hashed = await bcrypt.hash(password, 10);
-        await conn.query("UPDATE usuarios SET password = ? WHERE id = ?", [hashed, user.id]);
-      }
-    }
-
-    if (!validPassword) {
-      return res.status(401).json({ error: "Credenciales incorrectas" });
-    }
-    // Obtiene los segmentos asociados al usuario
-    const [segmentosRows] = await conn.query(
-      "SELECT segmento_id FROM usuarios_segmentos WHERE usuario_id = ?",
-      [user.id]
-    );
-    const segmentos = segmentosRows.map((row) => row.segmento_id);
-
-    // Generar token JWT con los datos del usuario y segmentos
-    const payload = {
-      id: user.id,
-      usuario: user.usuario,
-      nombre: user.nombre,
-      rol: user.rol,
-      co_ven: user.co_ven,
-      segmentos,
-    };
-    const secret = process.env.JWT_SECRET;
-    const token = jwt.sign(payload, secret, { expiresIn: "12h" });
-
-    // Devuelve el usuario y el token
-    res.json({
-      message: "Login exitoso",
-      user: {
-        ...user,
-        segmentos,
-      },
-      token, // Incluye el token en la respuesta
-    });
+    res.json({ message: "Login exitoso", user: rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error en el servidor" });
