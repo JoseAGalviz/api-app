@@ -4,18 +4,35 @@ import { getMysqlPool } from "../config/database.js";
 import bcrypt from "bcryptjs";
 import { sql } from "../config/database.js";
 
-// Pool específico para transferencias
-const transferenciasConfig = {
-  host: process.env.DB_TRANS_HOST,
-  user: process.env.DB_TRANS_USER,
-  password: process.env.DB_TRANS_PASSWORD,
-  database: "transferencias",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-};
+// Pool específico para transferencias (inicialización lazy)
+let _transferenciasPool = null;
 
-const transferenciasPool = await mysql.createPool(transferenciasConfig);
+function getTransferenciasPool() {
+  if (_transferenciasPool) return _transferenciasPool;
+
+  const host = process.env.DB_TRANS_HOST;
+  const user = process.env.DB_TRANS_USER;
+  const password = process.env.DB_TRANS_PASSWORD;
+
+  if (!host || !user || !password) {
+    throw new Error(
+      `Variables de entorno de la BD de transferencias no configuradas. ` +
+      `DB_TRANS_HOST=${host}, DB_TRANS_USER=${user}, DB_TRANS_PASSWORD=${password ? '***' : '(vacío)'}`
+    );
+  }
+
+  _transferenciasPool = mysql.createPool({
+    host,
+    user,
+    password,
+    database: "transferencias",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
+
+  return _transferenciasPool;
+}
 
 // Utilidad para limpiar los campos string de un objeto
 function cleanStrings(obj) {
@@ -71,7 +88,7 @@ export const registrarUsuario = async (req, res) => {
         : null;
     const fecha = new Date();
 
-    const pool = transferenciasPool;
+    const pool = getTransferenciasPool();
 
 
     const query = `
@@ -367,7 +384,7 @@ export const loginUsuario = async (req, res) => {
     }
 
     const query = `SELECT user, password, rol, telefono, estado, segmento, proveedor, status, fecha, catalogo FROM usuarios WHERE user = ? LIMIT 1`;
-    const [rows] = await transferenciasPool.execute(query, [usuario.trim()]);
+    const [rows] = await getTransferenciasPool().execute(query, [usuario.trim()]);
 
     if (rows.length === 0) {
       return res.status(401).json({ error: "Usuario no encontrado." });
@@ -505,7 +522,7 @@ export const getTiemposPago = async (req, res) => {
   try {
     // Usando el pool MySQL (transferenciasPool) para consultar la tabla tiempos_pago
     const query = "SELECT id, tiempo, porcentaje, columna, fecha FROM tiempos_pago ORDER BY id";
-    const [rows] = await transferenciasPool.execute(query);
+    const [rows] = await getTransferenciasPool().execute(query);
 
     // Limpiar strings y devolver resultado
     const cleaned = rows.map(cleanStrings);
@@ -521,7 +538,7 @@ export const getTiemposPagoTransferencias = async (req, res) => {
   try {
     // Usar el pool MySQL 'transferenciasPool' ya definido en este archivo
     const sql = "SELECT id, tiempo, porcentaje, columna FROM tiempos_pago ORDER BY id";
-    const [rows] = await transferenciasPool.execute(sql);
+    const [rows] = await getTransferenciasPool().execute(sql);
 
     // Limpiar strings (reutiliza la función cleanStrings definida arriba)
     const cleaned = (rows || []).map(cleanStrings);
@@ -574,7 +591,7 @@ export const getUnidadesPorUsuario = async (req, res) => {
       WHERE p.cod_prov = ?
       GROUP BY u.usuario
     `;
-    const [rows] = await transferenciasPool.execute(sql, [proveedor_codigo]);
+    const [rows] = await getTransferenciasPool().execute(sql, [proveedor_codigo]);
     res.json(rows.map(cleanStrings));
   } catch (err) {
     console.error("Error getUnidadesPorUsuario:", err);
@@ -601,7 +618,7 @@ export const getProductosVendidos = async (req, res) => {
       WHERE p.cod_prov = ?
       GROUP BY pp.co_art
     `;
-    const [rows] = await transferenciasPool.execute(sqlProd, [proveedor_codigo]);
+    const [rows] = await getTransferenciasPool().execute(sqlProd, [proveedor_codigo]);
     res.json(rows.map(cleanStrings));
   } catch (err) {
     console.error("Error getProductosVendidos:", err);
@@ -626,7 +643,7 @@ export const getTransferenciasProveedor = async (req, res) => {
       FROM pedidos
       WHERE cod_prov = ?
     `;
-    const [rows] = await transferenciasPool.execute(sqlTrans, [proveedor_codigo]);
+    const [rows] = await getTransferenciasPool().execute(sqlTrans, [proveedor_codigo]);
     res.json(rows.map(cleanStrings));
   } catch (err) {
     console.error("Error getTransferenciasProveedor:", err);
@@ -647,7 +664,7 @@ export const getTotalGeneralProveedor = async (req, res) => {
     }
 
     const sqlTotal = `SELECT SUM(tot_bruto) AS total FROM pedidos WHERE cod_prov = ?`;
-    const [rows] = await transferenciasPool.execute(sqlTotal, [proveedor_codigo]);
+    const [rows] = await getTransferenciasPool().execute(sqlTotal, [proveedor_codigo]);
 
     const total = rows && rows.length > 0 && rows[0].total !== null
       ? Number(rows[0].total)
@@ -982,7 +999,7 @@ export const getRenglonesFactura = async (req, res) => {
 
         // ── PASO 3 ─────────────────────────────────────────────────────────────
         try {
-          const [rows] = await transferenciasPool.execute(
+          const [rows] = await getTransferenciasPool().execute(
             `SELECT co_us_in, fact_num FROM pedidos WHERE TRIM(fact_num) = ? LIMIT 1`,
             [numDoc2]
           );
@@ -994,7 +1011,7 @@ export const getRenglonesFactura = async (req, res) => {
 
             // ── Buscar productos en pedidos_productos ──────────────────────────
             try {
-              const [productos] = await transferenciasPool.execute(
+              const [productos] = await getTransferenciasPool().execute(
                 `SELECT fact_num, co_art, cantidad, precio, subtotal, created_at
                  FROM pedido_productos
                  WHERE TRIM(fact_num) = ?`,
@@ -1189,7 +1206,7 @@ export const getPedidosPorUsuario = async (req, res) => {
         // ─────────────────────────────────────────────
         // 2. Obtener Pedidos del usuario (MySQL)
         // ─────────────────────────────────────────────
-        const [pedidos] = await transferenciasPool.execute(
+        const [pedidos] = await getTransferenciasPool().execute(
             `SELECT id, fact_num, cod_cliente, cod_prov, tot_bruto, tot_neto, saldo, iva,
                     codigo_pedido, porc_gdesc, descrip, co_us_in, fecha
              FROM pedidos
@@ -1212,7 +1229,7 @@ export const getPedidosPorUsuario = async (req, res) => {
         // 3. Obtener Productos de los pedidos (MySQL)
         // ─────────────────────────────────────────────
         const placeholders = pedidoIds.map(() => '?').join(',');
-        const [todosProductos] = await transferenciasPool.execute(
+        const [todosProductos] = await getTransferenciasPool().execute(
             `SELECT pp.pedido_id, pp.co_art, pp.cantidad, pp.precio, pp.subtotal,
                     pp.co_alma, pp.reng_num
              FROM pedido_productos pp
@@ -1561,7 +1578,7 @@ export const getVentasPorUsuariosProveedor = async (req, res) => {
     const mes  = req.body?.mes  ? Number(req.body.mes)  : now.getMonth() + 1;
     const anio = req.body?.anio ? Number(req.body.anio) : now.getFullYear();
 
-    const pool = transferenciasPool;
+    const pool = getTransferenciasPool();
 
     // 1) Obtener usuarios del proveedor
     let usuarios = [];
@@ -1937,14 +1954,14 @@ export const editTiemposPagoTransferencias = async (req, res) => {
     params.push(idNum);
 
     const sqlUpdate = `UPDATE tiempos_pago SET ${updates.join(", ")} WHERE id = ?`;
-    const [result] = await transferenciasPool.execute(sqlUpdate, params);
+    const [result] = await getTransferenciasPool().execute(sqlUpdate, params);
 
     if (!result || result.affectedRows === 0) {
       return res.status(404).json({ error: "Registro no encontrado o sin cambios" });
     }
 
     // Devolver el registro actualizado
-    const [rows] = await transferenciasPool.execute(
+    const [rows] = await getTransferenciasPool().execute(
       "SELECT id, tiempo, porcentaje, columna, fecha FROM tiempos_pago WHERE id = ? LIMIT 1",
       [idNum]
     );
@@ -2019,7 +2036,7 @@ export const getNotasCreditoTransferencias = async (req, res) => {
 
     // DEBUG: mostrar la query y parámetros antes de ejecutar
 
-    const [rows] = await transferenciasPool.execute(sqlQuery, params);
+    const [rows] = await getTransferenciasPool().execute(sqlQuery, params);
 
 
     const cleaned = (rows || []).map((r) => {
@@ -2069,7 +2086,7 @@ export const crearNotaCreditoTransferencias = async (req, res) => {
     if (isNaN(fechaVal.getTime())) return res.status(400).json({ error: "fecha inválida" });
 
     // Obtener columnas reales de la tabla para armar INSERT dinámico
-    const [colsRows] = await transferenciasPool.execute(
+    const [colsRows] = await getTransferenciasPool().execute(
       "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notas_credito'",
       [transferenciasConfig.database]
     );
@@ -2104,20 +2121,20 @@ export const crearNotaCreditoTransferencias = async (req, res) => {
     const sqlInsert = `INSERT INTO notas_credito (${colsToInsert.join(", ")}) VALUES (${placeholders})`;
 
     // Ejecutar INSERT
-    const [result] = await transferenciasPool.execute(sqlInsert, params);
+    const [result] = await getTransferenciasPool().execute(sqlInsert, params);
 
     let insertId = result.insertId ?? null;
     let created = null;
 
     if (insertId) {
-      const [rows] = await transferenciasPool.execute(
+      const [rows] = await getTransferenciasPool().execute(
         "SELECT * FROM notas_credito WHERE id = ? LIMIT 1",
         [insertId]
       );
       if (rows && rows.length > 0) created = cleanStrings(rows[0]);
     } else {
       // Fallback: buscar por factura+proveedor+monto reciente
-      const [rows] = await transferenciasPool.execute(
+      const [rows] = await getTransferenciasPool().execute(
         `SELECT * FROM notas_credito WHERE factura = ? AND proveedor = ? AND monto = ? ORDER BY id DESC LIMIT 1`,
         [String(factura).trim(), String(proveedor).trim(), montoNum]
       );
@@ -2191,7 +2208,7 @@ export const getNotasCreditoPorProveedor = async (req, res) => {
 
     sqlQuery += " ORDER BY fecha DESC, id DESC";
 
-    const [rows] = await transferenciasPool.execute(sqlQuery, params);
+    const [rows] = await getTransferenciasPool().execute(sqlQuery, params);
 
 
     const cleaned = (rows || []).map((r) => {
@@ -2373,7 +2390,7 @@ export const buscarNotasCreditoPorProveedorExacto = async (req, res) => {
       params = [`%${proveedor}%`];
     }
 
-    const [rows] = await transferenciasPool.execute(sqlQuery, params);
+    const [rows] = await getTransferenciasPool().execute(sqlQuery, params);
 
     const cleaned = (rows || []).map((r) => {
       const c = cleanStrings(r);
@@ -2474,7 +2491,7 @@ export const getUsuarios = async (req, res) => {
     if (where.length) sqlQuery += " WHERE " + where.join(" AND ");
     sqlQuery += " ORDER BY id DESC";
 
-    const [rows] = await transferenciasPool.execute(sqlQuery, params);
+    const [rows] = await getTransferenciasPool().execute(sqlQuery, params);
     res.json((rows || []).map(cleanStrings));
   } catch (err) {
     console.error("getUsuarios:", err);
@@ -2528,10 +2545,10 @@ export const editUsuario = async (req, res) => {
 
     params.push(id);
     const updateSql = `UPDATE usuarios SET ${updates.join(", ")} WHERE id = ?`;
-    const [result] = await transferenciasPool.execute(updateSql, params);
+    const [result] = await getTransferenciasPool().execute(updateSql, params);
 
     // Traer el registro actualizado
-    const [rows] = await transferenciasPool.execute(
+    const [rows] = await getTransferenciasPool().execute(
       "SELECT id, user, rol, telefono, estado, segmento, session_id, proveedor, status, fecha, catalogo FROM usuarios WHERE id = ? LIMIT 1",
       [id]
     );
@@ -2576,7 +2593,7 @@ export const getTodosPedidos = async (req, res) => {
 
     sqlBase += " ORDER BY fecha DESC, id DESC";
 
-    const [rows] = await transferenciasPool.execute(sqlBase, params);
+    const [rows] = await getTransferenciasPool().execute(sqlBase, params);
 
     // Mapear cod_cliente -> cli_des y cod_prov -> prov_des usando SQL Server (Profit)
     if (rows && rows.length > 0) {
@@ -2728,7 +2745,7 @@ export const getPedidosConInconsistencias = async (req, res) => {
     if (!startDate && !endDate) {
       pedidosSql += " LIMIT 200";
     }
-    const [pedidos] = await transferenciasPool.execute(pedidosSql, params);
+    const [pedidos] = await getTransferenciasPool().execute(pedidosSql, params);
     // Función auxiliar para consultar Profit unitariamente (lógica encapsulada)
     const checkProfitInconsistency = async (pedido) => {
       const cantMySQL = pedido.cant_articulos_mysql;
@@ -2836,7 +2853,7 @@ export const getPedidosConInconsistencias = async (req, res) => {
       if (inconsistentIds.length > 0) {
         // Consultar productos de los pedidos inconsistentes
         const placeholders = inconsistentIds.map(() => '?').join(',');
-        const [productosRows] = await transferenciasPool.execute(
+        const [productosRows] = await getTransferenciasPool().execute(
           `SELECT pedido_id, co_art
              FROM pedido_productos 
              WHERE pedido_id IN (${placeholders})`,
