@@ -516,8 +516,13 @@ export const loginUser = async (req, res) => {
       "SELECT * FROM usuarios WHERE usuario = ? AND password = ? LIMIT 1",
       [username, password]
     );
-
+    console.log('[login] filas encontradas:', rows.length);
     if (rows.length === 0) {
+      const [byUser] = await conn.query(
+        "SELECT usuario, password FROM usuarios WHERE usuario = ? LIMIT 1",
+        [username]
+      );
+      console.log('[login] usuario existe?', byUser.length > 0 ? `sí, password en DB: "${byUser[0].password}"` : 'NO existe en DB');
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
