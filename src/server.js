@@ -53,13 +53,13 @@ app.get("/", (req, res) => res.send("API is running."));
 app.use("/api/auth", authLimiter, authRoutes);
 
 // Rutas protegidas
-app.use("/api/clientes", verifyToken, clientesRoutes);
-app.use("/api/facturas", verifyToken, facturasRoutes);
-app.use("/api/guias", verifyToken, guiasRoutes);
-app.use("/api/pagina", verifyToken, paginaRoutes);
-//app.use("/api/pedidos", verifyToken, pedidosRoutes);
-app.use("/api/auditoria", verifyToken, auditoriaVenRoutes);
-app.use("/api/pedidosApp", verifyToken, pedidosAppRoutes);
+app.use("/api/clientes", clientesRoutes);
+app.use("/api/facturas", facturasRoutes);
+app.use("/api/guias", guiasRoutes);
+app.use("/api/pagina", paginaRoutes);
+//app.use("/api/pedidos", pedidosRoutes);
+app.use("/api/auditoria", auditoriaVenRoutes);
+app.use("/api/pedidosApp", pedidosAppRoutes);
 
 // facturas-gestion: login/register públicos, datos protegidos (en route file)
 app.use("/api", facturasGestionRoutes);

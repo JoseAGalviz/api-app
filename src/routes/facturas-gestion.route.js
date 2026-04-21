@@ -28,10 +28,10 @@ router.post('/login', authLimiter, loginUser);
 router.post('/register', registerUser);
 
 // Rutas protegidas
-router.post('/facturas_locales', verifyToken, saveFacturasLocales);
-router.get('/gestiones', verifyToken, getGestiones);
-router.post('/gestiones', verifyToken, saveGestiones);
-router.get('/facturas_cargadas', verifyToken, getFacturasCargadas);
+router.post('/facturas_locales', saveFacturasLocales);
+router.get('/gestiones', getGestiones);
+router.post('/gestiones', saveGestiones);
+router.get('/facturas_cargadas', getFacturasCargadas);
 
 // Redirects (internos, sin token requerido)
 router.post('/redirect-to-ip', redirectToIp);
