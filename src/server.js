@@ -23,7 +23,7 @@ const PORT = process.env.PORT || 8001;
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 200,
   message: { error: "Demasiados intentos. Intenta en 15 minutos." },
   standardHeaders: true,
   legacyHeaders: false,
