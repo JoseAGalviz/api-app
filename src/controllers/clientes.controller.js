@@ -310,7 +310,7 @@ export const getVendedores = async (req, res) => {
 // Descarga la lista completa de clientes desde Bitrix24
 export const getClientesBitrix = async (req, res) => {
   const url =
-    "https://cristmedical.bitrix24.es/rest/5149/qly93wxo8xvetemt/crm.company.list.json";
+    process.env.BITRIX_MAIN_URL;
   const filter = { UF_CRM_1634787828: null };
   const select = ["ID", "TITLE", "UF_CRM_1685651349"];
   let start = 0;
@@ -411,7 +411,7 @@ const getGestionesPromise = async (req) => {
 
 const getClientesBitrixPromise = async (co_seg) => {
   const url =
-    "https://cristmedical.bitrix24.es/rest/5149/qly93wxo8xvetemt/crm.company.list.json";
+    process.env.BITRIX_MAIN_URL;
   const filter = { UF_CRM_1634787828: null };
   const select = ["ID", "TITLE", "UF_CRM_1685651349"];
   let start = 0;

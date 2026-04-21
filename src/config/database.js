@@ -1,79 +1,111 @@
+import 'dotenv/config';
 import sql from 'mssql';
 import mysql from 'mysql2/promise';
 
 export const remoteConfig = {
-  user: 'profit',
-  password: 'profit',
-  server: '192.168.4.20',
+  user: process.env.DB_REMOTE_USER,
+  password: process.env.DB_REMOTE_PASSWORD,
+  server: process.env.DB_REMOTE_SERVER,
   port: 1433,
-  database: 'CRISTM25',
-
+  database: process.env.DB_REMOTE_DATABASE,
   options: {
     encrypt: false,
     trustServerCertificate: true
   },
   pool: {
     max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000
+    min: 2,
+    idleTimeoutMillis: 30000,
+    acquireTimeoutMillis: 15000,
   },
-  connectionTimeout: 300000,
-  requestTimeout: 300000
+  connectionTimeout: 15000,
+  requestTimeout: 60000
 };
 
 export const localConfig = {
-  host: '192.168.4.23',
-  user: 'desarrollo',
-  password: 'E-xUUctByBsPTe7A',
+  host: process.env.DB_LOCAL_HOST,
+  user: process.env.DB_LOCAL_USER,
+  password: process.env.DB_LOCAL_PASSWORD,
   database: 'app',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  connectTimeout: 10000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 };
 
-// Configuración MSSQL (tedious / mssql)
 export const mssqlConfig = {
-  user: process.env.MSSQL_USER || "desarrollo",
-  password: process.env.MSSQL_PASSWORD || "E-xUUctByBsPTe7A",
-  server: process.env.MSSQL_HOST || "192.168.4.23",
-  database: process.env.MSSQL_DATABASE || "app",
+  user: process.env.MSSQL_USER || process.env.DB_LOCAL_USER,
+  password: process.env.MSSQL_PASSWORD || process.env.DB_LOCAL_PASSWORD,
+  server: process.env.MSSQL_HOST || process.env.DB_LOCAL_HOST,
+  database: process.env.MSSQL_DATABASE || 'app',
   options: {
-    encrypt: false,                 // ajustar según entorno
-    trustServerCertificate: true,   // necesario en entornos internos sin certificado
+    encrypt: false,
+    trustServerCertificate: true,
   },
-  // Timeouts en milisegundos: aumentar desde 15000 a 300000 (5 min)
-  connectionTimeout: 300000,
-  requestTimeout: 300000,
+  connectionTimeout: 15000,
+  requestTimeout: 60000,
 };
 
 export let mysqlPool = null;
 export let negociacionesPool = null;
 
 export const negociacionesConfig = {
-  host: '192.168.4.23',
-  user: 'desarrollo',
-  password: 'E-xUUctByBsPTe7A',
+  host: process.env.DB_NEG_HOST,
+  user: process.env.DB_NEG_USER,
+  password: process.env.DB_NEG_PASSWORD,
   database: 'negociaciones',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  connectTimeout: 10000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 };
 
 export async function connectDB(configType = 'remote') {
   try {
     if (configType === 'local') {
-      mysqlPool = await mysql.createPool(localConfig);
+      mysqlPool = mysql.createPool(localConfig);
       console.log('Conexión exitosa a MySQL (local)');
     } else if (configType === 'negociaciones') {
-      negociacionesPool = await mysql.createPool(negociacionesConfig);
+      negociacionesPool = mysql.createPool(negociacionesConfig);
       console.log('Conexión exitosa a MySQL (negociaciones)');
     } else {
       await sql.connect(remoteConfig);
       console.log('Conexión exitosa a SQL Server (remoto)');
     }
   } catch (err) {
-    console.error('Error de conexión:', err);
+    console.error(`Error de conexión [${configType}]:`, err.message);
   }
+}
+
+export async function checkDBHealth() {
+  const status = { sqlServer: false, mysql: false, negociaciones: false };
+  try {
+    await new sql.Request().query('SELECT 1');
+    status.sqlServer = true;
+  } catch { /* unreachable or down */ }
+
+  try {
+    const conn = await mysqlPool?.getConnection();
+    if (conn) { conn.release(); status.mysql = true; }
+  } catch { /* down */ }
+
+  try {
+    const conn = await negociacionesPool?.getConnection();
+    if (conn) { conn.release(); status.negociaciones = true; }
+  } catch { /* down */ }
+
+  return status;
+}
+
+export async function reconnectSQL() {
+  try {
+    await sql.close();
+  } catch { /* already closed */ }
+  await connectDB('remote');
 }
 
 export function getMysqlPool() {
@@ -85,4 +117,3 @@ export function getNegociacionesPool() {
 }
 
 export { sql };
-

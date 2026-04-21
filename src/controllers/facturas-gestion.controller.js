@@ -1,22 +1,17 @@
 import { getMysqlPool, sql } from "../config/database.js";
 import { DateTime } from "luxon";
 import fetch from "node-fetch";
-import jwt from "jsonwebtoken"; // Agrega esta línea al inicio si no está
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 
 // POST /facturas/locales
 export const saveFacturasLocales = async (req, res) => {
-  console.log("Body recibido en saveFacturasLocales:", JSON.stringify(req.body, null, 2));
   const pool = getMysqlPool();
   if (!pool) {
     return res.status(500).json({ error: "MySQL no conectado" });
   }
 
   const { facturas } = req.body;
-  // Mostrar en consola los datos recibidos
-  console.log(
-    "Facturas recibidas en saveFacturasLocales:",
-    JSON.stringify(facturas, null, 2)
-  );
 
   if (!Array.isArray(facturas) || facturas.length === 0) {
     return res
@@ -113,25 +108,6 @@ export const saveFacturasLocales = async (req, res) => {
           .toFormat("yyyy-MM-dd HH:mm:ss.SSS");
       }
 
-      // Mostrar en consola los datos que se insertarán
-      console.log("Insertando factura:", {
-        fact_num,
-        co_cli,
-        cli_des,
-        tipo,
-        dias_credito,
-        fec_emis,
-        fec_venc_antes,
-        fecVencDespuesFinal,
-        fechaEscaneoFinal,
-        co_ven,
-        co_zon,
-        zon_des,
-        co_seg,
-        seg_des,
-        coordenadas: coordenadas || null,
-        observacion_logistica: comentario_rango == null ? " " : comentario_rango
-      });
 
       await conn.query(insertQuery, [
         fact_num,
@@ -296,7 +272,7 @@ export const getGestiones = async (req, res) => {
 
     // --- Optimización: consulta a Bitrix en lotes de hasta 50 co_cli únicos ---
     const bitrixApiUrl =
-      "https://cristmedical.bitrix24.es/rest/5149/qly93wxo8xvetemt/crm.company.list.json";
+      process.env.BITRIX_MAIN_URL;
     const bitrixCache = {};
     const allCoCli = [
       ...new Set(rows.map((row) => row.co_cli).filter(Boolean)),
@@ -522,7 +498,6 @@ export const saveGestiones = async (req, res) => {
 
 // POST /login
 export const loginUser = async (req, res) => {
-  console.log("Datos recibidos en /api/auth/login:", req.body);
   const pool = getMysqlPool();
   if (!pool) {
     return res.status(500).json({ error: "MySQL no conectado" });
@@ -536,10 +511,9 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ error: "Usuario y contraseña requeridos" });
     }
 
-    // Busca el usuario en la base de datos
     const [rows] = await conn.query(
-      "SELECT * FROM usuarios WHERE usuario = ? AND password = ? LIMIT 1",
-      [username, password]
+      "SELECT * FROM usuarios WHERE usuario = ? LIMIT 1",
+      [username]
     );
 
     if (rows.length === 0) {
@@ -547,6 +521,24 @@ export const loginUser = async (req, res) => {
     }
 
     const user = rows[0];
+
+    // Detecta si el password almacenado es bcrypt o texto plano (migración automática)
+    const isHashed = user.password.startsWith('$2');
+    let validPassword = false;
+    if (isHashed) {
+      validPassword = await bcrypt.compare(password, user.password);
+    } else {
+      validPassword = user.password === password;
+      if (validPassword) {
+        // Auto-migrar a bcrypt en el primer login exitoso
+        const hashed = await bcrypt.hash(password, 10);
+        await conn.query("UPDATE usuarios SET password = ? WHERE id = ?", [hashed, user.id]);
+      }
+    }
+
+    if (!validPassword) {
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
     // Obtiene los segmentos asociados al usuario
     const [segmentosRows] = await conn.query(
       "SELECT segmento_id FROM usuarios_segmentos WHERE usuario_id = ?",
@@ -563,7 +555,7 @@ export const loginUser = async (req, res) => {
       co_ven: user.co_ven,
       segmentos,
     };
-    const secret = process.env.JWT_SECRET || "CR19"; // Usa una clave secreta segura en producción
+    const secret = process.env.JWT_SECRET;
     const token = jwt.sign(payload, secret, { expiresIn: "12h" });
 
     // Devuelve el usuario y el token
@@ -608,9 +600,10 @@ export const registerUser = async (req, res) => {
       return res.status(400).json({ error: "Datos incompletos" });
     }
 
+    const hashedPassword = await bcrypt.hash(password, 10);
     const [userResult] = await conn.query(
       "INSERT INTO usuarios (nombre, usuario, password, rol, fecha_registro, estado, co_ven) VALUES (?, ?, ?, ?, NOW(), 1, ?)",
-      [nombre, usuario, password, rol, co_ven]
+      [nombre, usuario, hashedPassword, rol, co_ven]
     );
     const userId = userResult.insertId;
 
@@ -625,7 +618,6 @@ export const registerUser = async (req, res) => {
     res.status(201).json({
       name: nombre,
       email: usuario,
-      password: password,
       role: rol,
       segmentos: segmentos,
       co_ven: co_ven,
@@ -678,7 +670,7 @@ async function promisePool(tasks, poolLimit = 5) {
 
 async function fetchAllBitrixData(co_cli_list) {
   const bitrixApiUrl =
-    "https://b24-sjdauj.bitrix24.es/rest/3397/jnalszd1xam9wk9d/crm.company.list.json";
+    process.env.BITRIX_ALT_URL;
   const bitrixCache = {};
   const co_cli_set = new Set(co_cli_list.filter(Boolean));
   const co_cli_array = Array.from(co_cli_set);
@@ -755,7 +747,6 @@ export const redirectToIp = (req, res) => {
     return res.status(400).json({ error: "URL inválida" });
   }
 
-  console.log(`Redirigiendo a: ${target}`);
   return res.redirect(302, target);
 }
 
@@ -775,8 +766,7 @@ export const redirectToFixedIp = (req, res) => {
 
   // Si es numérico, lo normalizamos a 5 dígitos con ceros a la izquierda (ej: 10 -> 00010)
 
-
-  const base = 'http://98.94.185.164:8020/dashboard';
+  const base = process.env.DASHBOARD_BASE_URL;
   const target = `${base}?ven=${encodeURIComponent(coVenStr)}`;
 
   // Validación mínima de la URL resultante
@@ -790,7 +780,6 @@ export const redirectToFixedIp = (req, res) => {
     return res.status(400).json({ error: 'URL fija inválida' });
   }
 
-  console.log(`Redirigiendo a URL fija con ven=${coVenStr}: ${target}`);
   return res.redirect(302, target);
 }
 
@@ -809,7 +798,7 @@ export const redirectToVendedorFixedIp = (req, res) => {
   }
 
   // Construir URL target
-  const base = 'http://98.94.185.164:8025/vendedor';
+  const base = process.env.VENDEDOR_BASE_URL;
   const target = `${base}?co_ven=${encodeURIComponent(coVenStr)}`;
 
   // Validación mínima de la URL resultante
@@ -823,6 +812,5 @@ export const redirectToVendedorFixedIp = (req, res) => {
     return res.status(400).json({ error: 'URL fija inválida' });
   }
 
-  console.log(`Redirigiendo a URL fija vendedor co_ven=${coVenStr}: ${target}`);
   return res.redirect(302, target);
 }

@@ -1,6 +1,5 @@
-// Endpoint: POST /api/pagina/facturas-segmento
-// Body JSON: { co_cli: string, co_seg: array|string, fecha_min: string, fechas_venc: array|string, page?: int, perPage?: int }
-import { sql } from '../config/database.js'; // Ajustar importación
+import 'dotenv/config';
+import { sql } from '../config/database.js';
 import mysql from 'mysql2/promise';
 
 import fs from 'fs';
@@ -14,11 +13,10 @@ const writeLog = (data) => {
   fs.appendFileSync(logFile, linea);
 };
 
-// Configuración para MySQL en otro servidor (192.168.4.148)
 const mysqlComparadorConfig = {
-    host: '192.168.4.148',
-    user: 'root',
-    password: process.env.MYSQL_COMPARADOR_PASSWORD || '10445610',
+    host: process.env.DB_COMPARADOR_HOST,
+    user: process.env.DB_COMPARADOR_USER,
+    password: process.env.DB_COMPARADOR_PASSWORD,
     database: 'comparador',
     waitForConnections: true,
     connectionLimit: 10,
@@ -389,149 +387,6 @@ export const getFacturasPorSegmento = async (req, res) => {
       });
   }
 };
-
-// export const getFacturasPorSegmentoDpPago = async (req, res) => {
-//   try {
-//     let {
-//       co_cli = null,
-//       co_seg = null,
-//       co_ven = null,
-//       page = 1,
-//       perPage = 20,
-//       todos = false,
-//     } = req.body && Object.keys(req.body).length ? req.body : {};
-
-//     const offset = (parseInt(page) - 1) * parseInt(perPage);
-//     const request = new sql.Request();
-//     let where = ["D.saldo > 0"];
-
-//     if (co_cli) {
-//       where.push("LTRIM(RTRIM(B.co_cli)) = @co_cli");
-//       request.input("co_cli", sql.VarChar, co_cli.trim());
-//     } else if (co_seg && co_seg.length > 0) {
-//       const segs = Array.isArray(co_seg) ? co_seg : [co_seg];
-//       const placeholders = segs.map((_, i) => `@seg${i}`).join(", ");
-//       where.push(`A.co_seg IN (${placeholders})`);
-//       segs.forEach((seg, i) => request.input(`seg${i}`, sql.VarChar, seg.trim()));
-//     }
-
-//     if (co_ven) {
-//       where.push("LTRIM(RTRIM(C.co_ven)) = @co_ven");
-//       request.input("co_ven", sql.VarChar, co_ven.trim());
-//     }
-
-//     const whereClause = "WHERE " + where.join(" AND ");
-
-//     const query = `
-//       SELECT
-//         B.co_cli, B.cli_des, B.tipo, B.contribu, C.tasa,
-//         (C.tot_neto / C.tasa) AS tot_neto, C.fact_num,
-//         (D.saldo / C.tasa) AS saldo_dolar, C.iva,
-//         CAST(D.fec_emis AS DATE) AS emision,
-//         CAST(D.fec_venc AS DATE) AS vence,
-//         ISNULL(P.hasta1, 0) as hasta1, ISNULL(P.hasta2, 0) as hasta2, ISNULL(P.hasta3, 0) as hasta3,
-//         ISNULL(P.hasta4, 0) as hasta4, ISNULL(P.hasta5, 0) as hasta5,
-//         ISNULL(P.porc1, 0) as porc1, ISNULL(P.porc2, 0) as porc2, ISNULL(P.porc3, 0) as porc3,
-//         ISNULL(P.porc4, 0) as porc4, ISNULL(P.porc5, 0) as porc5, ISNULL(P.porc6, 0) as porc6,
-//         (SELECT TOP 1 RB.num_doc
-//                         FROM dbo.reng_fac RA
-//                         INNER JOIN dbo.reng_nde RB ON RA.num_doc = RB.fact_num AND RB.tipo_doc='T'
-//                         INNER JOIN dbo.cotiz_c CC ON RB.num_doc = CC.fact_num AND CC.co_us_in<>'311'
-//                             WHERE RA.fact_num = C.fact_num) AS origen
-//       FROM dbo.segmento AS A
-//       JOIN dbo.clientes AS B ON A.co_seg = B.co_seg
-//       JOIN dbo.factura AS C ON B.co_cli = C.co_cli
-//       JOIN dbo.docum_cc AS D ON C.fact_num = D.nro_doc
-//       LEFT JOIN dbo.dppago AS P ON LTRIM(RTRIM(B.tipo)) = LTRIM(RTRIM(P.tipo_cli))
-//       ${whereClause} AND C.saldo = D.saldo
-//       ORDER BY C.co_cli DESC, C.fec_venc ASC
-//       ${todos ? "" : "OFFSET @offset ROWS FETCH NEXT @perPage ROWS ONLY"}
-//     `;
-
-//     request.input("offset", sql.Int, offset);
-//     request.input("perPage", sql.Int, parseInt(perPage));
-
-//     const result = await request.query(query);
-//     const tasaActualResult = await sql.query(`SELECT cambio FROM moneda WHERE co_mone = 'US$'`);
-//     const tasaHoy = tasaActualResult.recordset[0]?.cambio || 0;
-
-//     const facturas = result.recordset.map((factura) => {
-//       let f = { ...factura };
-//       for (const key in f) { if (typeof f[key] === 'string') f[key] = f[key].trim(); }
-
-//       const hoy = new Date();
-//       const tHoy = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-//       const fVence = new Date(f.vence);
-//       const tVence = Date.UTC(fVence.getUTCFullYear(), fVence.getUTCMonth(), fVence.getUTCDate());
-      
-//       const diffDays = Math.round((tHoy - tVence) / (1000 * 60 * 60 * 24));
-
-//       let porcEscalaRaw = 0;
-//       let escalaNombre = "Sin Escala";
-
-//       // Comparación inversa para escalas negativas (mora) y positivas (pronto pago)
-//       const d = diffDays * -1;
-
-//       if (d <= f.hasta1) { porcEscalaRaw = f.porc1; escalaNombre = "Escala 1"; }
-//       else if (d <= f.hasta2) { porcEscalaRaw = f.porc2; escalaNombre = "Escala 2"; }
-//       else if (d <= f.hasta3) { porcEscalaRaw = f.porc3; escalaNombre = "Escala 3"; }
-//       else if (d <= f.hasta4) { porcEscalaRaw = f.porc4; escalaNombre = "Escala 4"; }
-//       else if (d <= f.hasta5) { porcEscalaRaw = f.porc5; escalaNombre = "Escala 5"; }
-//       else { porcEscalaRaw = f.porc6; escalaNombre = "Escala 6"; }
-
-//       const saldoOriginal = Number(f.saldo_dolar || 0);
-//       let montoDesc10 = 0;
-//       let montoDescPP = 0;
-//       let porcPPFinal = 0;
-
-//       // Aseguramos que valorEscala sea un número válido
-//       const valorEscala = Number(parseFloat(porcEscalaRaw || 0).toFixed(2));
-
-//       if (valorEscala > 0) {
-//         if (valorEscala > 10.00) {
-//           // 10% base
-//           montoDesc10 = Number((saldoOriginal * 0.10).toFixed(2));
-//           const saldoCon10 = Number((saldoOriginal - montoDesc10).toFixed(2));
-          
-//           // Redondeo hacia arriba del excedente (2.7 -> 3)
-//           porcPPFinal = Math.ceil(valorEscala - 10);
-//           montoDescPP = Number((saldoCon10 * (porcPPFinal / 100)).toFixed(2));
-//         } else {
-//           // Escalas de 10% o menos (6.3 -> 7, 10.0 -> 10)
-//           porcPPFinal = Math.ceil(valorEscala); 
-//           montoDescPP = Number((saldoOriginal * (porcPPFinal / 100)).toFixed(2));
-//           montoDesc10 = 0;
-//         }
-//       } else {
-//         escalaNombre = "Vencida";
-//         porcPPFinal = 0;
-//       }
-
-//       const totalAhorroDolar = Number((montoDesc10 + montoDescPP).toFixed(2));
-//       const montoFinalDolar = Number((saldoOriginal - totalAhorroDolar).toFixed(2));
-
-//       return {
-//         ...f,
-//         dias_mora: diffDays,
-//         escala_aplicada: escalaNombre,
-//         porcentaje_escala: valorEscala,
-//         porcentaje_dpp: porcPPFinal,
-//         descuento_pp_porc: porcPPFinal,
-//         monto_descuento_base: montoDesc10,
-//         monto_descuento_pp: montoDescPP,
-//         monto_descuento_total_dolar: totalAhorroDolar,
-//         monto_dolar: montoFinalDolar,
-//         monto_bs: Number((montoFinalDolar * (tasaHoy || f.tasa)).toFixed(2)),
-//         tasa_hoy: tasaHoy
-//       };
-//     });
-
-//     res.json(facturas);
-//   } catch (error) {
-//     // Si hay un error, lo enviamos para saber qué pasó
-//     res.status(500).json({ message: "Error", error: error.message });
-//   }
-// };
 
 export const getFacturasPorSegmentoDpPago = async (req, res) => {
   try {
@@ -1395,70 +1250,6 @@ export const getTopArticulosVendidosMes = async (req, res) => {
   }
 };
 
-// export const getStockArticuloss = async (req, res) => {
-//   try {
-//     const { co_arts } = req.body;
-//     if (!Array.isArray(co_arts) || co_arts.length === 0) {
-//       return res
-//         .status(400)
-//         .json({ message: "Debe enviar un array no vacío en co_arts" });
-//     }
-
-//     // Limpiar espacios en blanco de los códigos recibidos
-//     const co_arts_trimmed = co_arts.map((art) => art.trim());
-
-//     // Construir placeholders dinámicos para la consulta
-//     const placeholders = co_arts_trimmed
-//       .map((_, idx) => `@co_art${idx}`)
-//       .join(", ");
-//     const query = `
-//       SELECT 
-//           LTRIM(RTRIM(sa.co_art)) AS co_art,
-//           CASE 
-//               WHEN LTRIM(RTRIM(sa.co_alma)) IN ('01','02') THEN '01'
-//               WHEN LTRIM(RTRIM(sa.co_alma)) IN ('04','05') THEN '04'
-//           END AS co_alma,
-//           SUM(sa.stock_act) AS stock_act,
-//           SUM(sa.stock_com) AS stock_com
-//       FROM st_almac sa
-//       WHERE LTRIM(RTRIM(sa.co_art)) IN (${placeholders})
-//         AND LTRIM(RTRIM(sa.co_alma)) IN ('01','02','04','05')
-//       GROUP BY 
-//           LTRIM(RTRIM(sa.co_art)),
-//           CASE 
-//               WHEN LTRIM(RTRIM(sa.co_alma)) IN ('01','02') THEN '01'
-//               WHEN LTRIM(RTRIM(sa.co_alma)) IN ('04','05') THEN '04'
-//           END
-//       HAVING SUM(sa.stock_act) > 0 
-//         OR SUM(sa.stock_com) > 0;
-
-//     `;
-
-//     const request = new sql.Request();
-//     co_arts_trimmed.forEach((art, idx) => {
-//       request.input(`co_art${idx}`, sql.VarChar, art);
-//     });
-
-//     const result = await request.query(query);
-
-//     // Limpiar espacios en blanco en los resultados
-//     const cleanResult = result.recordset.map((row) => ({
-//       co_art: row.co_art?.trim(),
-//       co_alma: row.co_alma?.trim(),
-//       alma_des: row.alma_des?.trim(),
-//       stock_act: row.stock_act,
-//       stock_com: row.stock_com,
-//     }));
-
-//     res.json(cleanResult);
-//   } catch (error) {
-//     res.status(500).json({
-//       message: "Error al obtener el stock de artículos",
-//       error: error.message,
-//     });
-//   }
-// };
-
 export const getStockArticuloss = async (req, res) => {
   try {
     const { co_arts } = req.body;
@@ -1560,8 +1351,7 @@ export const getArticulosConStock = async (req, res) => {
 };
 
 // GET /api/factura/:fact_num
-export const getDatosFactura = async (req, res) => {
-  console.log("Datos recibidos en /api/pagina/factura:", req.body); // <-- Agregado
+export const getDatosFactura = async (req, res) => { // <-- Agregado
   const { fact_num } = req.body;
   if (!/^\d+$/.test(String(fact_num))) {
     return res.status(400).json({ message: "Número de factura inválido" });
@@ -1637,8 +1427,7 @@ export const getDatosFactura = async (req, res) => {
 };
 
 // POST /api/pagina/facturas/buscar
-export const buscarFacturasPorCliente = async (req, res) => {
-  console.log("Datos recibidos en /api/pagina/facturas/buscar:", req.body); // <-- Agregado
+export const buscarFacturasPorCliente = async (req, res) => { // <-- Agregado
   const { co_cli, cli_des } = req.body;
 
   const query = `

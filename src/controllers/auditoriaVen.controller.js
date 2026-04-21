@@ -1,51 +1,5 @@
-import { sql, getMysqlPool } from "../config/database.js";
-
+import { sql, getMysqlPool, remoteConfig } from "../config/database.js";
 import { DateTime } from "luxon";
-
-// Helpers
-
-
-
-export const remoteConfig = {
-  user: 'profit',
-  password: 'profit',
-  server: '192.168.4.20',
-  port: 1433,
-  database: 'CRISTM25',
-  options: {
-    encrypt: false,
-    trustServerCertificate: true
-  },
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000
-  },
-  connectionTimeout: 300000,
-  requestTimeout: 300000
-};
-
-const logRequest = (fnName, req) => {
-  try {
-    const safe = {
-      method: req?.method,
-
-      path: req?.path ?? req?.originalUrl,
-
-      params: req?.params ?? null,
-
-      query: req?.query ?? null,
-
-      body: req?.body ?? null,
-
-      headers: req?.headers ?? null,
-    };
-
-    console.log(`[${fnName}] recibida: ${JSON.stringify(safe, null, 2)}`);
-  } catch (e) {
-    console.log(`[${fnName}] error al serializar request: ${e?.message}`);
-  }
-};
 
 const toNumber = (v) =>
   v === undefined || v === null || v === "" ? null : Number(v);
@@ -77,7 +31,6 @@ const cleanString = (v) => (typeof v === "string" ? v.trim() : v);
 // ===============================
 
 export const getVendedoresPagina = async (req, res) => {
-  logRequest("getVendedoresPagina", req);
 
   try {
     const pool = getMysqlPool();
@@ -113,7 +66,6 @@ export const getVendedoresPagina = async (req, res) => {
 //   - usuario: filtra por la columna `usuario` (opcional, exact match)
 //   - limit: cantidad máxima de filas a devolver (opcional, por defecto 100)
 export const getVendedoresMercado = async (req, res) => {
-  logRequest("getVendedoresMercado", req);
 
   try {
     const pool = getMysqlPool();
@@ -148,7 +100,6 @@ export const getVendedoresMercado = async (req, res) => {
 // ===============================
 
 export const getGestionesPorDia = async (req, res) => {
-  logRequest("getGestionesPorDia", req);
 
   try {
     const pool = getMysqlPool();
@@ -209,7 +160,6 @@ export const getGestionesPorDia = async (req, res) => {
 // ===============================
 
 export const getSegmentos = async (req, res) => {
-  logRequest("getSegmentos", req);
 
   try {
     const request = new sql.Request();
@@ -243,7 +193,6 @@ export const getSegmentos = async (req, res) => {
 // ===============================
 
 export const getZonas = async (req, res) => {
-  logRequest("getZonas", req);
 
   try {
     const request = new sql.Request();
@@ -277,7 +226,6 @@ export const getZonas = async (req, res) => {
 // ===============================
 
 export const insertarKpiVendedor = async (req, res) => {
-  logRequest("insertarKpiVendedor", req);
 
   try {
     const pool = getMysqlPool();
@@ -578,20 +526,10 @@ export const insertarKpiVendedor = async (req, res) => {
 
           // params[0] = co_ven, params[23] = fecha
 
-          console.log(
-            `\U0001f50d Buscando registro existente: co_ven="${params[0]}", fecha="${params[23]}"`,
-          );
-
           const [existing] = await conn.query(
             "SELECT * FROM kpi_vendedores WHERE co_ven = ? AND DATE(fecha) = DATE(?) FOR UPDATE",
 
             [params[0], params[23]],
-          );
-
-          console.log(
-            `\u2713 Registros encontrados:`,
-            existing.length,
-            existing.length > 0 ? existing[0] : "ninguno",
           );
 
           if (existing.length > 0) {
@@ -625,7 +563,7 @@ export const insertarKpiVendedor = async (req, res) => {
                   const tb = new Date(b).getTime();
 
                   return ta === tb;
-                } catch {}
+                } catch { /* invalid date — fall through to string comparison */ }
               }
 
               // Numeric comparison
@@ -755,7 +693,7 @@ export const insertarKpiVendedor = async (req, res) => {
         } catch (txErr) {
           try {
             await conn.rollback();
-          } catch {}
+          } catch { /* best-effort rollback — ignore secondary failure */ }
 
           conn.release();
 
@@ -805,7 +743,6 @@ export const insertarKpiVendedor = async (req, res) => {
 // ===============================
 
 export const getKpiVendedores = async (req, res) => {
-  logRequest("getKpiVendedores", req);
 
   try {
     const pool = getMysqlPool();
@@ -838,11 +775,11 @@ export const getKpiVendedores = async (req, res) => {
     const params = [];
 
     // Si solicitan por id, mantenemos comportamiento cl\ufffdsico (filtrar por id)
+    let sqlQuery;
     if (id) {
       where.push("id = ?");
       params.push(id);
-      // Consulta directa por id
-      var sqlQuery =
+      sqlQuery =
         "SELECT * FROM kpi_vendedores WHERE id = ? ORDER BY fecha DESC LIMIT ?";
       params.push(Number(limit) || 100);
     } else {
@@ -978,7 +915,6 @@ export const getKpiVendedores = async (req, res) => {
 // ===============================
 
 export const getKpiMetas = async (req, res) => {
-  logRequest("getKpiMetas", req);
 
   try {
     const pool = getMysqlPool();
@@ -1063,12 +999,6 @@ export const getKpiMetas = async (req, res) => {
       DateTime.fromJSDate(d).setZone("America/Caracas").toFormat("yyyyLLdd");
     const fechaInicioProfit = formatProfitDate(startDate);
     const fechaFinProfit = formatProfitDate(endDate);
-
-    // Log temporal para debugging de fechas
-
-    console.log(
-      `[getKpiMetas] fechaInicioProfit=${fechaInicioProfit}, fechaFinProfit=${fechaFinProfit}, userProvidedStart=${userProvidedStart}, userProvidedEnd=${userProvidedEnd}`,
-    );
 
     // Filtros adicionales
 
@@ -1735,8 +1665,6 @@ export const getKpiMetas = async (req, res) => {
         .toFormat("yyyy-MM-dd");
     
       // Log para debug
-      console.log(`[getKpiMetas] Filtro Fechas MySQL: ${fechaIniMysql} a ${fechaFinMysql}`);
-      console.log(`[getKpiMetas] Filtro 'HOY' para visitas/horas: ${todayMysql}`);
 
       // 1. Pedidos (Mantiene rango de fechas seleccionado por el usuario o por defecto)
       const pedidosQueryFix = `
@@ -1782,7 +1710,6 @@ export const getKpiMetas = async (req, res) => {
         const gestionesQuery = `SELECT * FROM gestiones WHERE fecha_registro >= ? AND fecha_registro <= ?`;
         const [gestionesRows] = await pool.query(gestionesQuery, [todayMysqlStart, todayMysqlEnd]);
         
-        console.log(`[getKpiMetas] Gestiones del día encontradas: ${gestionesRows.length}`);
 
         // C. Deduplicación (lógica tomada de getGestiones)
         const seen = new Set();
@@ -1818,8 +1745,6 @@ export const getKpiMetas = async (req, res) => {
              seen.add(key);
              return true;
         });
-
-        console.log(`[getKpiMetas] Gestiones únicas tras deduplicar: ${gestionesUnicas.length}`);
 
         // D. Contar visitas y calcular horas por vendedor
         for (const g of gestionesUnicas) {
@@ -1961,7 +1886,6 @@ export const getKpiMetas = async (req, res) => {
 };
 
 export const getGestionesConPromedioHoras = async (req, res) => {
-  logRequest("getGestionesConPromedioHoras", req);
 
   try {
     const pool = getMysqlPool();
@@ -2099,7 +2023,6 @@ export const getGestionesConPromedioHoras = async (req, res) => {
 };
 
 export const registrarComisionVendedor = async (req, res) => {
-  logRequest("registrarComisionVendedor", req);
 
   try {
     const pool = getMysqlPool();
@@ -2304,7 +2227,6 @@ export const registrarComisionVendedor = async (req, res) => {
 // ===============================
 
 export const getMatrixExcelDatos = async (req, res) => {
-  logRequest("getMatrixExcelDatos", req);
 
   try {
     const limitParam = req.query.limit || req.body?.limit;
@@ -2352,7 +2274,6 @@ export const getMatrixExcelDatos = async (req, res) => {
     }
 
     // Log para depuración
-    console.log("[getMatrixExcelDatos] SQL:", query, "PARAMS:", params);
 
     const [rows] = await pool.query(query, params);
 
@@ -2372,7 +2293,6 @@ export const getMatrixExcelDatos = async (req, res) => {
 // Filtra excel_data_potencial por vendedor_bitrix
 // ===============================
 export const getExcelDataPotencial = async (req, res) => {
-  logRequest("getExcelDataPotencial", req);
 
   let mssqlPool = null;
 
@@ -2507,7 +2427,6 @@ export const getComisionesVendedores = async (req, res) => {
 };
 // Nuevo endpoint GET/POST /vendedores-rutas
 export const getVendedoresRutas = async (req, res) => {
-  logRequest("getVendedoresRutas", req);
 
   try {
     const pool = getMysqlPool();
@@ -2545,7 +2464,6 @@ export const getVendedoresRutas = async (req, res) => {
 
 // Nuevo endpoint GET/POST /cobertura-vendedores
 export const getCoberturaVendedores = async (req, res) => {
-  logRequest("getCoberturaVendedores", req);
 
   try {
     const pool = getMysqlPool();

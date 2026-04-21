@@ -1,19 +1,15 @@
 import { getMysqlPool } from '../config/database.js';
 
 export const importExcel = async (req, res) => {
-    console.log("📥 Petición de importación de JSON recibida");
     try {
         const data = req.body;
 
         if (!data || !Array.isArray(data)) {
-            console.log("❌ No se recibió un array de datos");
             return res.status(400).json({ message: 'No se recibieron datos válidos (se espera un array)' });
         }
 
-        console.log(`📊 Filas recibidas desde el frontend: ${data.length}`);
 
         if (data.length === 0) {
-            console.log("⚠️ El array de datos está vacío");
             return res.status(400).json({ message: 'El array de datos está vacío' });
         }
 

@@ -10,12 +10,11 @@ function getFechaVenezuela() {
     return venezuelaDate.toISOString().replace('T', ' ').substring(0, 19);
 }
 
-// Configuración para la base de datos remota de 'visor', ya que no está en database.js
 const remoteConfig = {
-    host: '192.168.4.148',
-    user: 'prueba',
-    password: 'G13vLx8mFsAq7jvi',
-    database: 'visor',
+    host: process.env.DB_VISOR_HOST,
+    user: process.env.DB_VISOR_USER,
+    password: process.env.DB_VISOR_PASSWORD,
+    database: process.env.DB_VISOR_DATABASE,
     port: 3306
 };
 
@@ -88,9 +87,6 @@ export const buscarCarga = async (req, res) => {
 export const guardarCarga = async (req, res) => {
     const { detalle, cargado, ok, id_ca } = req.body;
     // Mostrar TODO lo que llega al endpoint para diagnóstico
-    console.log('guardarCarga - request ip:', req.ip || req.connection?.remoteAddress);
-    console.log('guardarCarga - headers:', JSON.stringify(req.headers || {}, null, 2));
-    console.log('guardarCarga - raw body:', JSON.stringify(req.body || {}, null, 2));
 
     if (!ok || !Array.isArray(detalle) || !Array.isArray(cargado)) {
         return res.status(400).json({ error: 'JSON inválido. Debe incluir ok, detalle y cargado.' });
@@ -107,7 +103,6 @@ export const guardarCarga = async (req, res) => {
         const status_dos = 'pendiente';
 
         // Comprobación robusta: registrar datos recibidos y verificar existencia usando TRIM/COALESCE
-        console.log('guardarCarga - cargado recibido:', JSON.stringify(cargado, null, 2));
 
         if (!Array.isArray(cargado) || cargado.length === 0) {
             return res.status(400).json({ error: 'No hay datos de cargado para insertar' });
@@ -120,7 +115,6 @@ export const guardarCarga = async (req, res) => {
             String(guia0.vehiculo ?? '').trim(),
             String(guia0.realizado ?? '').trim()
         ];
-        console.log('guardarCarga - verificando existencia con params:', params);
 
         // Si el cliente envía id_ca, usamos para permitir mismo id_ca pero detectar si existe otra guía con mismos datos
         const providedIdCa = id_ca ? String(id_ca) : null;
@@ -141,7 +135,6 @@ export const guardarCarga = async (req, res) => {
 
             if (idRows.length > 0) {
                 // Ya existe la fila con ese id_ca: actualizamos sus campos para mantener consistencia
-                console.log(`guardarCarga - id_ca ${providedIdCa} existe, actualizando fila en vez de insertar`);
 
                 // Construir UPDATE dinámico solo con columnas existentes
                 const updateParts = [];
@@ -166,7 +159,6 @@ export const guardarCarga = async (req, res) => {
                 existingRows = [];
             } else {
                 // id_ca proporcionado pero no existe en la tabla: permitimos insertar un nuevo registro
-                console.log(`guardarCarga - id_ca ${providedIdCa} no existe en tabla local. Se insertará nuevo registro.`);
                 existingRows = [];
             }
         } else {
@@ -175,7 +167,6 @@ export const guardarCarga = async (req, res) => {
             const [rows] = await localConnection.query(query, params);
             existingRows = rows;
         }
-        console.log('guardarCarga - filas encontradas en guia:', existingRows);
 
         if (existingRows.length > 0) {
             // Si la fila encontrada tiene distinto id_ca al proporcionado, informar cuál existe

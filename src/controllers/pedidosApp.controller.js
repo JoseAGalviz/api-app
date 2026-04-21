@@ -1,98 +1,18 @@
-import express from "express";
-const router = express.Router();
+import 'dotenv/config';
 import { sql } from "../config/database.js";
 import { v4 as uuidv4 } from "uuid";
 import mysql from "mysql2/promise";
+import { ejecutarConsulta, limpiarValor, parseNumberFromString, obtenerFechaVenezuelaISO } from "../utils/helpers.js";
 
-// Configuración de la conexión a la base de datos de transferencias (MySQL)
-const transferenciasConfig = {
-  host: "192.168.4.23",
-  user: "desarrollo",
-  password: "E-xUUctByBsPTe7A",
+const transferenciasPool = mysql.createPool({
+  host: process.env.DB_TRANS_HOST,
+  user: process.env.DB_TRANS_USER,
+  password: process.env.DB_TRANS_PASSWORD,
   database: "app",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-};
-
-const transferenciasPool = mysql.createPool(transferenciasConfig);
-
-// Pool MySQL para la base de datos 'app' (donde se crearon tablas pedidos y pedido_productos)
-const appDbConfig = { ...transferenciasConfig, database: "app" };
-const appPool = mysql.createPool(appDbConfig);
-
-// ============================================
-// FUNCIONES AUXILIARES PARA MONTAR PEDIDOS
-// ============================================
-
-/**
- * Función auxiliar para ejecutar consultas SQL Server.
- * Crea un request y vincula parámetros dinámicamente.
- * @param {string} query - La consulta SQL a ejecutar.
- * @param {Object} params - Objeto con los parámetros {nombre: valor}.
- * @returns {Promise<Array>} - Retorna el recordset de la consulta.
- */
-async function ejecutarConsulta(query, params = {}) {
-  const request = new sql.Request();
-  for (const key in params) {
-    request.input(key, params[key]);
-  }
-  const result = await request.query(query);
-  return result.recordset;
-}
-
-/**
- * Función para limpiar valores (quita espacios y convierte null a string vacío).
- * @param {*} valor - El valor a limpiar.
- * @returns {string} - El valor limpio.
- */
-function limpiarValor(valor) {
-  return valor ? String(valor).trim() : "";
-}
-
-/**
- * Convierte strings como "16.14 $" o "1,234.56" a Number.
- * Maneja varios formatos numéricos y retorna 0 si no es válido.
- * @param {*} v - Valor a convertir.
- * @returns {number} - Número parseado o 0.
- */
-function parseNumberFromString(v) {
-  if (v === null || v === undefined || v === "") return 0;
-  if (typeof v === "number") return v;
-  const s = String(v).replace(/\$/g, "").replace(/,/g, "").trim();
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-/**
- * Obtiene la fecha/hora actual en la zona horaria de Venezuela en formato 'YYYY-MM-DD HH:mm:ss'.
- * @returns {string} - Fecha formateada.
- */
-function obtenerFechaVenezuelaISO() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "America/Caracas",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  })
-    .formatToParts(now)
-    .reduce((acc, p) => {
-      acc[p.type] = p.value;
-      return acc;
-    }, {});
-  const year = parts.year || "0000";
-  const month = parts.month || "01";
-  const day = parts.day || "01";
-  const hour = parts.hour || "00";
-  const minute = parts.minute || "00";
-  const second = parts.second || "00";
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-}
+});
 
 /**
  * Obtiene el siguiente número de factura desde la tabla Sucursales (cotc_num).
@@ -421,7 +341,6 @@ async function obtenerPrecioVentaCliente(co_cli, co_art) {
 export const getCatalogo = async (req, res) => {
   try {
     // Log de auditoría para depuración
-    console.log("[pedidosApp] Consultando catálogo de productos...");
 
     // Soporta tanto parámetros por URL (GET) como por el cuerpo de la petición (POST)
     const co_prov_input = req.query.co_prov ?? req.body?.co_prov;
@@ -612,9 +531,6 @@ export const getClientes = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
-// Exportación del router (opcional, dependiendo de cómo manejes las rutas)
-export default router;
 // CONTINUATION OF AUXILIARY FUNCTIONS FOR pedidosApp.controller.js
 // Add these functions after the existing code
 
@@ -1076,12 +992,6 @@ async function registrarPista(fact_num, codigo_pedido, ip_cliente) {
  */
 export const crearPedidoApp = async (req, res) => {
   try {
-    console.log(
-      "[pedidosApp] /crear endpoint recibido en:",
-      new Date().toISOString(),
-    );
-    console.log("--- /pedidosApp/crear - request body ---");
-    console.log(JSON.stringify(req.body, null, 2));
 
     try {
       const {
@@ -1140,13 +1050,6 @@ export const crearPedidoApp = async (req, res) => {
           .status(400)
           .json({ error: "Datos incompletos para crear el pedido." });
       }
-
-      console.log("[pedidosApp] Iniciando procesamiento:", {
-        codigo_pedido,
-        cod_cliente,
-        itemsCount: items.length,
-        timestamp: new Date().toISOString(),
-      });
 
       // Obtener desc_glob del cliente para calcular los totales correctos en el backend
       const descGlobCliente = await obtenerDescGlobCliente(cod_cliente);
@@ -1334,7 +1237,7 @@ export const crearPedidoApp = async (req, res) => {
 
       // Además, guardar copia en la base MySQL 'app' (tablas: pedidos, pedido_productos)
       try {
-        const connApp = await appPool.getConnection();
+        const connApp = await transferenciasPool.getConnection();
         try {
           await connApp.beginTransaction();
 
@@ -1425,12 +1328,6 @@ export const crearPedidoApp = async (req, res) => {
       }
 
       res.json({ success: true, fact_num });
-      console.log("[pedidosApp] Pedido procesado correctamente:", {
-        fact_num,
-        codigo_pedido,
-        cod_cliente,
-        timestamp: new Date().toISOString(),
-      });
     } catch (error) {
       console.error(
         "Error al crear el pedido:",

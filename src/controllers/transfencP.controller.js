@@ -1,72 +1,18 @@
-import express from "express";
-const router = express.Router();
+import 'dotenv/config';
 import { sql } from "../config/database.js";
 import { v4 as uuidv4 } from "uuid";
 import mysql from "mysql2/promise";
+import { ejecutarConsulta, limpiarValor, parseNumberFromString, obtenerFechaVenezuelaISO } from "../utils/helpers.js";
 
-// Configuración de la conexión a la base de datos de transferencias
-const transferenciasConfig = {
-  host: "192.168.4.23",
-  user: "desarrollo",
-  password: "E-xUUctByBsPTe7A",
+const transferenciasPool = mysql.createPool({
+  host: process.env.DB_TRANS_HOST,
+  user: process.env.DB_TRANS_USER,
+  password: process.env.DB_TRANS_PASSWORD,
   database: "transferencias",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-};
-
-const transferenciasPool = mysql.createPool(transferenciasConfig);
-
-// Función auxiliar para ejecutar consultas
-async function ejecutarConsulta(query, params = {}) {
-  const request = new sql.Request();
-  for (const key in params) {
-    request.input(key, params[key]);
-  }
-  const result = await request.query(query);
-  return result.recordset;
-}
-
-// Función para limpiar valores (quita espacios y convierte null a string vacío)
-function limpiarValor(valor) {
-  return valor ? String(valor).trim() : "";
-}
-
-// Convierte strings como "16.14 $" o "1,234.56" a Number
-function parseNumberFromString(v) {
-  if (v === null || v === undefined || v === "") return 0;
-  if (typeof v === "number") return v;
-  const s = String(v).replace(/\$/g, "").replace(/,/g, "").trim();
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-// Obtiene la fecha/hora actual en la zona horaria de Venezuela en formato 'YYYY-MM-DD HH:mm:ss'
-function obtenerFechaVenezuelaISO() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "America/Caracas",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  })
-    .formatToParts(now)
-    .reduce((acc, p) => {
-      acc[p.type] = p.value;
-      return acc;
-    }, {});
-  const year = parts.year || "0000";
-  const month = parts.month || "01";
-  const day = parts.day || "01";
-  const hour = parts.hour || "00";
-  const minute = parts.minute || "00";
-  const second = parts.second || "00";
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-}
+});
 
 // Genera el texto de descripción del pedido de forma consistente con el descuento real
 // FIX: centralizado aquí para que descrip SIEMPRE refleje el porc_gdesc real aplicado
@@ -679,21 +625,18 @@ async function formato_porc_desc_para_reng(co_art, co_cat) {
 }
 
 // Endpoint para probar obtenerSiguienteFactNum
-router.get("/next-fact-num", async (req, res) => {
+export const getNextFactNum = async (req, res) => {
   const nextFactNum = await obtenerSiguienteFactNum();
   if (nextFactNum !== null) {
     res.json({ nextFactNum });
   } else {
     res.status(500).json({ error: "No se pudo obtener el siguiente fact_num" });
   }
-});
+};
 
 // Endpoint para crear un pedido en Profit
-router.post("/crear", async (req, res) => {
+export const crearPedidoTransf = async (req, res) => {
   try {
-    console.log("[transfencP] /crear endpoint recibido en:", new Date().toISOString());
-    console.log("--- /transferencP/crear - request body ---");
-    console.log(JSON.stringify(req.body, null, 2));
 
     const {
       cod_cliente,
@@ -716,7 +659,6 @@ router.post("/crear", async (req, res) => {
       co_us_in,
     } = req.body;
 
-
     // coerción numérica segura
     const totBrutoNum = parseNumberFromString(tot_bruto);
     const totNetoNum = parseNumberFromString(tot_neto);
@@ -737,27 +679,9 @@ router.post("/crear", async (req, res) => {
       return res.status(400).json({ error: "Datos incompletos para crear el pedido." });
     }
 
-    console.log("[transfencP] Iniciando procesamiento del pedido:", {
-      codigo_pedido,
-      cod_cliente,
-      itemsCount: items.length,
-      timestamp: new Date().toISOString(),
-    });
-
     // descTotalParaCotiz: fuente de verdad del descuento aplicado
     const descTotalParaCotiz = parseNumberFromString(porc_gdesc);
 
-    // LOG DE DEPURACIÓN CRÍTICO PARA EL DESCUENTO
-    console.log("[transfencP] Cálculo de Descuento Global:", {
-      cod_cliente,
-      porc_gdesc_cliente,
-      porc_gdesc_proveedor,
-      porc_gdesc_recibido: porc_gdesc,
-      suma_descuentos_adicionales,
-      descuentos_adicionales,
-      descTotalParaCotiz,
-      formula: `${parseNumberFromString(porc_gdesc)} (JSON) = ${descTotalParaCotiz}`,
-    });
 
     // VALIDACIÓN DE SEGURIDAD:
     // Si por alguna razón descTotalParaCotiz da mucho más de lo esperado (ej. > 100), alertar.
@@ -771,12 +695,6 @@ router.post("/crear", async (req, res) => {
     // Esto garantiza que descrip, porc_gdesc, campo6 sean siempre consistentes
     // sin importar lo que venga en el body (texto libre, vacío, etc.).
     const descripFinal = generarDescripPedido(descTotalParaCotiz);
-
-    console.log("[transfencP] descrip generado:", {
-      descripRecibido: descrip,
-      descripFinalUsado: descripFinal,
-      descTotalParaCotiz,
-    });
 
     let totBrutoBackend = 0;
     let totIvaBackend = 0;
@@ -946,14 +864,6 @@ router.post("/crear", async (req, res) => {
     }
 
     res.json({ success: true, fact_num });
-    console.log("[transfencP] Pedido procesado correctamente:", {
-      fact_num,
-      codigo_pedido,
-      cod_cliente,
-      descTotalParaCotiz,
-      descripFinal,
-      timestamp: new Date().toISOString(),
-    });
   } catch (error) {
     console.error(
       "Error al crear el pedido:",
@@ -962,7 +872,7 @@ router.post("/crear", async (req, res) => {
     console.error("Request body that caused the error:", JSON.stringify(req.body, null, 2));
     res.status(500).json({ error: "Error interno al crear el pedido." });
   }
-});
+};
 
 async function obtenerDescuentoArticulo(co_art, co_cat) {
   const result = await ejecutarConsulta(
@@ -1028,4 +938,3 @@ async function obtenerDescGlobCliente(co_cli) {
     : 0.0;
 }
 
-export default router;

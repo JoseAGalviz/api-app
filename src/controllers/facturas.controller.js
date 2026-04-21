@@ -89,7 +89,6 @@ export const getFacturasVencidas = async (req, res) => {
 
 // Lógica del antiguo scan_fac.js (POST /facturas/scan)
 export const scanFactura = async (req, res) => {
-    console.log('Datos recibidos en scanFactura:', req.body);
     let { num_factura } = req.body;
     if (!num_factura || typeof num_factura !== 'string' || !num_factura.trim()) {
         return res.status(400).json({ error: 'El campo num_factura es obligatorio y debe ser un string no vacío.' });
@@ -230,8 +229,6 @@ export const scanFactura = async (req, res) => {
 
 // Lógica del antiguo scan_fac/update.js
 export const updateFacturaFecha = async (req, res) => {
-    console.log('Entrando a updateFacturaFecha');
-    console.log('Datos recibidos en updateFacturaFecha:', req.body);
 
     let { fact_num, fec_venc_despues } = req.body;
 
@@ -265,7 +262,6 @@ export const updateFacturaFecha = async (req, res) => {
             const selectResult = await selectRequest.query(selectFactura);
             const campo8Antes = selectResult.recordset.length ? selectResult.recordset[0].campo8 : null;
             const fec_emis = selectResult.recordset.length ? selectResult.recordset[0].fec_emis : null;
-            console.log(`[ANTES] fact_num: ${num}, campo8: ${campo8Antes}, fec_emis: ${fec_emis}`);
 
             // Si ya está chequeado, no actualizar ni escanear
             if (campo8Antes && campo8Antes.trim() === 'CHEQUEADO APP') {
@@ -309,7 +305,6 @@ export const updateFacturaFecha = async (req, res) => {
             // Consulta el valor actualizado de campo8
             const selectResultDespues = await selectRequest.query(selectFactura);
             const campo8Despues = selectResultDespues.recordset.length ? selectResultDespues.recordset[0].campo8 : null;
-            console.log(`[DESPUES] fact_num: ${num}, campo8: ${campo8Despues}`);
 
             if (campo8Antes === campo8Despues) {
                 console.warn(`[WARN] campo8 NO CAMBIÓ para fact_num: ${num}`);

@@ -1,14 +1,14 @@
+import 'dotenv/config';
 import mysql from "mysql2/promise";
 import { getMysqlPool } from "../config/database.js";
 import bcrypt from "bcryptjs";
 import { sql } from "../config/database.js";
-import { Zone } from "luxon";
 
 // Pool específico para transferencias
 const transferenciasConfig = {
-  host: "192.168.4.23",
-  user: "desarrollo",
-  password: "E-xUUctByBsPTe7A",
+  host: process.env.DB_TRANS_HOST,
+  user: process.env.DB_TRANS_USER,
+  password: process.env.DB_TRANS_PASSWORD,
   database: "transferencias",
   waitForConnections: true,
   connectionLimit: 10,
@@ -44,8 +44,6 @@ export const registrarUsuario = async (req, res) => {
       session_id,
     } = req.body;
 
-    console.log("Datos recibidos para registrar usuario:", req.body);
-
     if (!usuario || !password || !rol) {
       return res
         .status(400)
@@ -75,20 +73,6 @@ export const registrarUsuario = async (req, res) => {
 
     const pool = transferenciasPool;
 
-    // Log de depuración antes de ejecutar el query
-    console.log("Valores a insertar:", [
-      usuario.trim(), // <-- Este valor va para la columna 'user'
-      hashedPassword,
-      rol.trim(),
-      telefono ? telefono.trim() : '',       // <- usar '' en vez de null
-      estado ? estado.trim() : '',          // <- usar '' en vez de null
-      segmentoStr || '',                    // <- asegurar string
-      session_id ? session_id.trim() : '',
-      proveedorStr || '',
-      status ? status.trim() : 'A',         // <- default 'A'
-      fecha,
-      catalogoStr || ''
-    ]);
 
     const query = `
       INSERT INTO usuarios (
@@ -375,7 +359,6 @@ export const getProveedores = async (req, res) => {
 
 export const loginUsuario = async (req, res) => {
   try {
-    console.log("Datos recibidos para login:", req.body);
 
     const { usuario, password } = req.body;
 
@@ -386,17 +369,13 @@ export const loginUsuario = async (req, res) => {
     const query = `SELECT user, password, rol, telefono, estado, segmento, proveedor, status, fecha, catalogo FROM usuarios WHERE user = ? LIMIT 1`;
     const [rows] = await transferenciasPool.execute(query, [usuario.trim()]);
 
-    console.log("Resultado MySQL:", rows);
-
     if (rows.length === 0) {
       return res.status(401).json({ error: "Usuario no encontrado." });
     }
 
     const user = rows[0];
-    console.log("Usuario encontrado:", user);
 
     const passwordMatch = await bcrypt.compare(password, user.password);
-    console.log("¿Password coincide?", passwordMatch);
 
     if (!passwordMatch) {
       return res.status(401).json({ error: "Contraseña incorrecta." });
@@ -422,11 +401,6 @@ export const loginUsuario = async (req, res) => {
 export const getCatalogo = async (req, res) => {
   try {
     // Log para ver exactamente qué llega al endpoint
-    console.log("Catalogo - method:", req.method, "url:", req.originalUrl);
-    console.log("Catalogo - headers:", { "content-type": req.headers["content-type"] });
-    console.log("Catalogo - query:", req.query);
-    console.log("Catalogo - body:", req.body);
-    console.log("Catalogo - params:", req.params);
 
     // Soporta tanto query (GET) como body (POST)
     const co_prov_input = req.query.co_prov ?? req.body?.co_prov;
@@ -706,8 +680,6 @@ export const getRenglonesFactura = async (req, res) => {
     const startDateObj = parseDate(startRaw) ?? new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     const endDateObj   = parseDate(endRaw)   ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    console.log(`[Fechas filtro] startDate=${startDateObj.toISOString()} | endDate=${endDateObj.toISOString()}`);
-
     if (!cod_prov) {
       return res.status(400).json({ error: "cod_prov requerido para filtrar por campo5" });
     }
@@ -770,7 +742,6 @@ export const getRenglonesFactura = async (req, res) => {
 
     // ─── Fallback: buscar en cotiz_c ──────────────────────────────────────────
     if (recordset.length === 0) {
-      console.log("No se encontraron facturas, buscando en cotiz_c...");
 
       const whereClausesCotiz = [
         "(c.campo5 = @cod_prov OR c.campo5 LIKE @cod_prov + ',%')",
@@ -844,7 +815,6 @@ export const getRenglonesFactura = async (req, res) => {
         );
         const nit = safeStr(resCli.recordset?.[0]?.nit) ?? null;
         sicmCache[key] = nit;
-        console.log(`  [sicm] co_cli="${key}" → nit="${nit}"`);
         return nit;
       } catch (e) {
         console.error(`  [sicm] Error buscando nit para co_cli="${key}":`, e.message);
@@ -869,7 +839,6 @@ export const getRenglonesFactura = async (req, res) => {
         );
         const campo4 = safeStr(resArt.recordset?.[0]?.campo4) ?? null;
         codBarCache[key] = campo4;
-        console.log(`  [cod_bar] co_art="${key}" → campo4="${campo4}"`);
         return campo4;
       } catch (e) {
         console.error(`  [cod_bar] Error buscando campo4 para co_art="${key}":`, e.message);
@@ -894,7 +863,6 @@ export const getRenglonesFactura = async (req, res) => {
         );
         const artDes = safeStr(resArt.recordset?.[0]?.art_des) ?? null;
         artDesCache[key] = artDes;
-        console.log(`  [art_des] co_art="${key}" → art_des="${artDes}"`);
         return artDes;
       } catch (e) {
         console.error(`  [art_des] Error buscando art_des para co_art="${key}":`, e.message);
@@ -979,7 +947,6 @@ export const getRenglonesFactura = async (req, res) => {
     for (const f of facturasArray) {
       try {
         const factNumLimpio = safeStr(f.fact_num);
-        console.log(`\n── Rastreando fact_num: "${factNumLimpio}"`);
 
         // ── PASO 1 ─────────────────────────────────────────────────────────────
         const req1 = new sql.Request();
@@ -993,10 +960,8 @@ export const getRenglonesFactura = async (req, res) => {
 
         const numDoc1 = safeStr(res1.recordset?.[0]?.num_doc);
         if (!numDoc1) {
-          console.log(`  [PASO 1] Sin resultado en reng_fac para fact_num="${factNumLimpio}"`);
           continue;
         }
-        console.log(`  [PASO 1] reng_fac.num_doc = "${numDoc1}"`);
 
         // ── PASO 2 ─────────────────────────────────────────────────────────────
         const req2 = new sql.Request();
@@ -1010,10 +975,8 @@ export const getRenglonesFactura = async (req, res) => {
 
         const numDoc2 = safeStr(res2.recordset?.[0]?.num_doc);
         if (!numDoc2) {
-          console.log(`  [PASO 2] Sin resultado en reng_nde para fact_num="${numDoc1}"`);
           continue;
         }
-        console.log(`  [PASO 2] reng_nde.num_doc = "${numDoc2}"`);
 
         f.pedido_num = numDoc2;
 
@@ -1026,7 +989,6 @@ export const getRenglonesFactura = async (req, res) => {
 
           if (rows?.length > 0) {
             f.co_us_in = safeStr(rows[0].co_us_in);
-            console.log(`  [PASO 3] co_us_in = "${f.co_us_in}"`);
 
             const pedidoFactNum = safeStr(rows[0].fact_num);
 
@@ -1054,9 +1016,7 @@ export const getRenglonesFactura = async (req, res) => {
                   });
                 }
                 f.db_mysql = db_mysql;
-                console.log(`  [PASO 3] db_mysql cargado con ${db_mysql.length} productos`);
               } else {
-                console.log(`  [PASO 3] Sin productos en pedidos_productos para fact_num="${pedidoFactNum}"`);
                 f.db_mysql = [];
               }
             } catch (errProductos) {
@@ -1065,7 +1025,6 @@ export const getRenglonesFactura = async (req, res) => {
             }
 
           } else {
-            console.log(`  [PASO 3] Sin resultado en MySQL pedidos para fact_num="${numDoc2}"`);
             f.co_us_in = null;
             f.db_mysql  = [];
           }
@@ -1192,7 +1151,6 @@ export const getRenglonesFactura = async (req, res) => {
     });
   }
 };
-
 
 export const getPedidosPorUsuario = async (req, res) => {
     try {
@@ -1925,8 +1883,6 @@ export const totalizarDeudaPorProveedor = async (req, res) => {
     `;
 
     // log compacto para depuración
-    console.log("totalizarDeudaPorProveedor - params:", { sinceDate: sinceDate?.toISOString() ?? null, endDate: endDate?.toISOString() ?? null });
-    console.log("totalizarDeudaPorProveedor - query:", query.replace(/\s+/g, " ").trim());
 
     const result = await request.query(query);
     return res.json(result.recordset || []);
@@ -2004,7 +1960,6 @@ export const editTiemposPagoTransferencias = async (req, res) => {
 export const getNotasCreditoTransferencias = async (req, res) => {
   try {
     // Debug mínimo para body/query
-    console.log("getNotasCreditoTransferencias - body:", req.body, "query:", req.query);
 
     const includeMonthsFlag =
       (req.body?.includeMonths ?? req.query?.includeMonths) === true ||
@@ -2063,14 +2018,9 @@ export const getNotasCreditoTransferencias = async (req, res) => {
     sqlQuery += " ORDER BY fecha DESC, id DESC";
 
     // DEBUG: mostrar la query y parámetros antes de ejecutar
-    console.log("getNotasCreditoTransferencias - SQL:", sqlQuery);
-    console.log("getNotasCreditoTransferencias - params:", params);
 
     const [rows] = await transferenciasPool.execute(sqlQuery, params);
 
-    // DEBUG: filas devueltas
-    console.log("getNotasCreditoTransferencias - filas devueltas:", (rows || []).length);
-    if ((rows || []).length > 0) console.log("getNotasCreditoTransferencias - ejemplo fila[0]:", rows[0]);
 
     const cleaned = (rows || []).map((r) => {
       const c = cleanStrings(r);
@@ -2096,7 +2046,6 @@ export const getNotasCreditoTransferencias = async (req, res) => {
     res.status(500).json({ error: "Error al obtener notas de crédito", detalle: err.message });
   }
 };
-
 
 export const crearNotaCreditoTransferencias = async (req, res) => {
   try {
@@ -2157,10 +2106,6 @@ export const crearNotaCreditoTransferencias = async (req, res) => {
     // Ejecutar INSERT
     const [result] = await transferenciasPool.execute(sqlInsert, params);
 
-    console.log("crearNotaCreditoTransferencias - INSERT SQL:", sqlInsert);
-    console.log("crearNotaCreditoTransferencias - params:", params);
-    console.log("crearNotaCreditoTransferencias - result:", result);
-
     let insertId = result.insertId ?? null;
     let created = null;
 
@@ -2191,7 +2136,6 @@ export const crearNotaCreditoTransferencias = async (req, res) => {
 
 export const getNotasCreditoPorProveedor = async (req, res) => {
   try {
-    console.log("getNotasCreditoPorProveedor - body:", req.body, "query:", req.query);
 
     const proveedor = req.body?.proveedor ?? req.query?.proveedor;
     if (!proveedor) {
@@ -2234,8 +2178,6 @@ export const getNotasCreditoPorProveedor = async (req, res) => {
         endDateObj = new Date(startParts.year, startParts.month, 0, 23, 59, 59, 999);
       }
 
-
-
       const fmt = (d) => {
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -2249,13 +2191,8 @@ export const getNotasCreditoPorProveedor = async (req, res) => {
 
     sqlQuery += " ORDER BY fecha DESC, id DESC";
 
-    console.log("getNotasCreditoPorProveedor - SQL:", sqlQuery);
-    console.log("getNotasCreditoPorProveedor - params:", params);
-
     const [rows] = await transferenciasPool.execute(sqlQuery, params);
 
-    console.log("getNotasCreditoPorProveedor - filas devueltas:", (rows || []).length);
-    if ((rows || []).length > 0) console.log("getNotasCreditoPorProveedor - ejemplo fila[0]:", rows[0]);
 
     const cleaned = (rows || []).map((r) => {
       const c = cleanStrings(r);
@@ -2411,14 +2348,8 @@ export const getProductosMasVendidosPorProveedoresCampo5 = async (req, res) => {
 export const buscarNotasCreditoPorProveedorExacto = async (req, res) => {
   try {
     // Mostrar en consola todo lo que llega al endpoint para depuración
-    console.log("buscarNotasCreditoPorProveedorExacto - method:", req.method, "url:", req.originalUrl);
-    console.log("buscarNotasCreditoPorProveedorExacto - headers:", { "content-type": req.headers["content-type"] });
-    console.log("buscarNotasCreditoPorProveedorExacto - query:", req.query);
-    console.log("buscarNotasCreditoPorProveedorExacto - body:", req.body);
-    console.log("buscarNotasCreditoPorProveedorExacto - params:", req.params);
 
     const proveedorRaw = req.body?.proveedor ?? req.query?.proveedor;
-    console.log("buscarNotasCreditoPorProveedorExacto - proveedor recibido (raw):", proveedorRaw);
 
     if (!proveedorRaw) {
       return res.status(400).json({ error: "proveedor requerido en body (JSON) o en query" });
@@ -2436,16 +2367,13 @@ export const buscarNotasCreditoPorProveedorExacto = async (req, res) => {
       const pattern = `^[[:space:]]*${code}([[:space:].-]|$)`;
       sqlQuery = "SELECT id, proveedor, observacion, factura, monto, fecha FROM notas_credito WHERE proveedor REGEXP ? ORDER BY fecha DESC";
       params = [pattern];
-      console.log("buscarNotasCreditoPorProveedorExacto - usando REGEXP pattern:", pattern);
     } else {
       // Si se pasa texto, hacemos LIKE para buscar coincidencias parciales (case-insensitive depende de collation)
       sqlQuery = "SELECT id, proveedor, observacion, factura, monto, fecha FROM notas_credito WHERE proveedor LIKE ? ORDER BY fecha DESC";
       params = [`%${proveedor}%`];
-      console.log("buscarNotasCreditoPorProveedorExacto - usando LIKE con:", params[0]);
     }
 
     const [rows] = await transferenciasPool.execute(sqlQuery, params);
-    console.log("buscarNotasCreditoPorProveedorExacto - filas encontradas:", (rows || []).length);
 
     const cleaned = (rows || []).map((r) => {
       const c = cleanStrings(r);

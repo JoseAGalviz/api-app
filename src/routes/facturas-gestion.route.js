@@ -1,26 +1,44 @@
 import express from 'express';
-import { 
-  saveFacturasLocales, 
-  getGestiones, 
-  saveGestiones, 
-  loginUser, 
+import {
+  saveFacturasLocales,
+  getGestiones,
+  saveGestiones,
+  loginUser,
   registerUser,
-  getFacturasCargadas // <-- agrega esto
+  getFacturasCargadas,
+  redirectToIp,
+  redirectToFixedIp,
+  redirectToVendedorFixedIp
 } from '../controllers/facturas-gestion.controller.js';
+import { verifyToken } from '../middleware/auth.js';
+import { rateLimit } from 'express-rate-limit';
 
 const router = express.Router();
 
-// Rutas para facturas_locales.js
-router.post('/facturas_locales', saveFacturasLocales);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: "Demasiados intentos. Intenta en 15 minutos." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-// Rutas para gestion_list.js y gestion.js
-router.get('/gestiones', getGestiones);
-router.post('/gestiones', saveGestiones);
-
-// Rutas para login.js y register.js
-router.post('/login', loginUser);
+// Rutas públicas
+router.post('/login', authLimiter, loginUser);
 router.post('/register', registerUser);
 
-router.get('/facturas_cargadas', getFacturasCargadas); // <-- agrega esta línea
+// Rutas protegidas
+router.post('/facturas_locales', verifyToken, saveFacturasLocales);
+router.get('/gestiones', verifyToken, getGestiones);
+router.post('/gestiones', verifyToken, saveGestiones);
+router.get('/facturas_cargadas', verifyToken, getFacturasCargadas);
+
+// Redirects (internos, sin token requerido)
+router.post('/redirect-to-ip', redirectToIp);
+router.get('/redirect-to-ip', redirectToIp);
+router.post('/redirect-fixed-ip', redirectToFixedIp);
+router.get('/redirect-fixed-ip', redirectToFixedIp);
+router.post('/redirect-vendedor-fixed-ip', redirectToVendedorFixedIp);
+router.get('/redirect-vendedor-fixed-ip', redirectToVendedorFixedIp);
 
 export default router;

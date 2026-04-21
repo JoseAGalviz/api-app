@@ -1,5 +1,3 @@
-import { sql } from '../config/database.js';
-
 export const gestionVisitas = async (req, res) => {
-    
-}
+  res.status(501).json({ error: "No implementado" });
+};
