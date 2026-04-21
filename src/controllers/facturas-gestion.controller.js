@@ -506,6 +506,7 @@ export const loginUser = async (req, res) => {
   let conn;
   try {
     conn = await pool.getConnection();
+    console.log('[login] body recibido:', req.body);
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: "Usuario y contraseña requeridos" });
