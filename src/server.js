@@ -18,6 +18,7 @@ import transfencPController from "./routes/transferencP.route.js";
 import pedidosAppRoutes from "./routes/pedidosApp.route.js";
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 8001;
 
 const authLimiter = rateLimit({
