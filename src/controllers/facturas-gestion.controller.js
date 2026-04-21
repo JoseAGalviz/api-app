@@ -521,7 +521,14 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ error: "Credenciales incorrectas" });
     }
 
-    res.json({ message: "Login exitoso", user: rows[0] });
+    const user = rows[0];
+    const [segmentosRows] = await conn.query(
+      "SELECT segmento_id FROM usuarios_segmentos WHERE usuario_id = ?",
+      [user.id]
+    );
+    user.segmentos = segmentosRows.map(r => r.segmento_id);
+
+    res.json({ user });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error en el servidor" });
