@@ -339,19 +339,20 @@ export const getClientesBitrix = async (req, res) => {
 
 export const getGestionesYBitrix = async (req, res) => {
   try {
-    // Lee el segmento desde la query string
     const { co_seg } = req.query;
+    console.log('[gestiones-bitrix] co_seg:', co_seg);
 
-    // Ejecuta ambas consultas en paralelo, pasando el segmento
     const [gestionesRes, bitrixRes] = await Promise.all([
       getGestionesPromise(req),
       getClientesBitrixPromise(co_seg),
     ]);
+    console.log('[gestiones-bitrix] gestiones:', gestionesRes.length, '| bitrix:', bitrixRes.length);
     res.json({
       gestiones: gestionesRes,
       bitrix: bitrixRes,
     });
   } catch (err) {
+    console.error('[gestiones-bitrix] error:', err.message);
     res.status(500).json({ error: "Error al consultar clientes y Bitrix24" });
   }
 };
