@@ -14,13 +14,13 @@ const transferenciasPool = mysql.createPool({
   queueLimit: 0,
 });
 
-// Genera el texto de descripción del pedido de forma consistente con el descuento real
-// FIX: centralizado aquí para que descrip SIEMPRE refleje el porc_gdesc real aplicado
-function generarDescripPedido(descTotalParaCotiz) {
-  if (descTotalParaCotiz > 0) {
-    return `Pg en $ ${descTotalParaCotiz}%`;
+// FIX: descrip y campo6 reflejan SOLO el descuento del proveedor
+// porc_gdesc refleja el descuento total (cliente + proveedor)
+function generarDescripPedido(descProveedor) {
+  if (descProveedor > 0) {
+    return `Pg en $ ${descProveedor}%`;
   }
-  return `Pedido numero del cte % = ${descTotalParaCotiz}`;
+  return `Pedido numero del cte % = 0`;
 }
 
 // Usa cotc_num en Sucursales para obtener el siguiente número de factura
@@ -142,9 +142,9 @@ async function obtenerPrecioVentaCliente(co_cli, co_art) {
   }
 }
 
-// FIX PRINCIPAL: insertarPedido recibe descrip ya generado desde el endpoint.
-// Ya NO extrae porcentaje del texto ni genera descrip internamente.
-// El campo6 y porc_gdesc siempre reflejan porcGdescFinal (el descuento real).
+// insertarPedido recibe:
+//   - descProveedor  : descuento aplicado por el proveedor (va a descrip y campo6)
+//   - porcGdescTotal : descuento total cliente + proveedor (va a porc_gdesc en DB)
 async function insertarPedido(
   fact_num,
   cod_cliente,
@@ -155,15 +155,18 @@ async function insertarPedido(
   iva,
   fecha_actual,
   codigo_pedido,
-  porc_gdesc,
-  porc_gdesc_total,
-  descrip  // <-- Viene ya generado correctamente desde el endpoint /crear
+  descProveedor,    // FIX: solo el descuento del proveedor -> descrip y campo6
+  porcGdescTotal,   // FIX: desc. total (cliente + proveedor) -> porc_gdesc en DB
+  descripFinal      // FIX: descrip ya generado correctamente desde el endpoint
 ) {
   try {
     const co_ven = await obtenerCoVenPorCliente(cod_cliente);
 
-    // porcGdescFinal es la fuente de verdad del descuento aplicado
-    const porcGdescFinal = parseNumberFromString(porc_gdesc);
+    // FIX: porc_gdesc en la DB es el descuento TOTAL (cliente + proveedor)
+    const porcGdescParaDB = parseNumberFromString(porcGdescTotal);
+
+    // FIX: campo6 es SOLO el descuento del proveedor
+    const valorCampo6 = String(parseNumberFromString(descProveedor));
 
     let { nombre: nombreCliente, rif: rifCliente } =
       await obtenerNombreYRifCliente(cod_cliente);
@@ -189,7 +192,8 @@ async function insertarPedido(
     const saldo_bs = Number((saldoNum * tasaRounded).toFixed(4));
     const iva_bs = Number((ivaNum * tasaRounded).toFixed(4));
 
-    const glob_desc_bs = tot_bruto_bs * (porcGdescFinal / 100);
+    // glob_desc usa el descuento total para reflejar el ahorro real
+    const glob_desc_bs = tot_bruto_bs * (porcGdescParaDB / 100);
 
     let fecha_sin_hora = fecha_actual;
     try {
@@ -206,10 +210,6 @@ async function insertarPedido(
       fecha_sin_hora = fecha_actual;
     }
 
-    // FIX: campo6 siempre usa porcGdescFinal directamente, sin re-extraer del texto de descrip.
-    // Esto garantiza que campo6 == porc_gdesc == el descuento real aplicado.
-    const valorCampo6 = String(porcGdescFinal);
-
     const valores = {
       fact_num,
       contrib: 1,
@@ -218,8 +218,7 @@ async function insertarPedido(
       nit: "",
       status: 0,
       comentario: "",
-      // FIX: descrip ya viene correcto desde el endpoint, no se genera ni modifica aquí
-      descrip: descrip,
+      descrip: descripFinal,          // FIX: solo desc. proveedor en texto
       saldo: saldo_bs,
       fec_emis: fecha_sin_hora,
       fec_venc: fecha_actual,
@@ -233,7 +232,7 @@ async function insertarPedido(
       iva: iva_bs,
       glob_desc: Number(glob_desc_bs.toFixed(4)),
       tot_reca: 0,
-      porc_gdesc: porcGdescFinal,
+      porc_gdesc: porcGdescParaDB,    // FIX: descuento total (cliente + proveedor)
       porc_reca: 0,
       total_uc: 0,
       total_cp: 0,
@@ -257,8 +256,7 @@ async function insertarPedido(
       campo3: "",
       campo4: "",
       campo5: cod_prov ? `${String(cod_prov)},TRANSFERENCIA` : "TRANSFERENCIA",
-      // FIX: campo6 siempre es el descuento real, no extraído del texto
-      campo6: valorCampo6,
+      campo6: valorCampo6,            // FIX: solo desc. proveedor como número
       campo7: "",
       campo8: "",
       co_us_in: "prov",
@@ -637,7 +635,6 @@ export const getNextFactNum = async (req, res) => {
 // Endpoint para crear un pedido en Profit
 export const crearPedidoTransf = async (req, res) => {
   try {
-
     const {
       cod_cliente,
       cod_prov,
@@ -646,25 +643,15 @@ export const crearPedidoTransf = async (req, res) => {
       saldo,
       iva,
       codigo_pedido,
-      porc_gdesc_cliente,
-      porc_gdesc_proveedor,
       porc_gdesc,
-      suma_descuentos_adicionales,
-      descuentos_adicionales,
       porc_gdesc_total,
-      descrip,         // <-- Se recibe pero NO se usa directamente (ver FIX abajo)
       ip_cliente,
       items,
       usuario,
       co_us_in,
     } = req.body;
 
-    // coerción numérica segura
-    const totBrutoNum = parseNumberFromString(tot_bruto);
-    const totNetoNum = parseNumberFromString(tot_neto);
-    const saldoNum = parseNumberFromString(saldo);
-    const ivaNum = parseNumberFromString(iva);
-
+    // Validación básica
     if (
       !cod_cliente ||
       codigo_pedido === undefined ||
@@ -679,22 +666,20 @@ export const crearPedidoTransf = async (req, res) => {
       return res.status(400).json({ error: "Datos incompletos para crear el pedido." });
     }
 
-    // descTotalParaCotiz: fuente de verdad del descuento aplicado
-    const descTotalParaCotiz = parseNumberFromString(porc_gdesc);
+    // FIX CLAVE:
+    // descProveedor  -> solo el descuento del proveedor (viene en items[].descuento, todos iguales)
+    // porcGdescTotal -> descuento total cliente + proveedor (viene como porc_gdesc_total del frontend)
+    const descProveedor = parseNumberFromString(items[0]?.descuento ?? 0);
+    const porcGdescTotal = parseNumberFromString(porc_gdesc_total ?? porc_gdesc ?? 0);
 
-
-    // VALIDACIÓN DE SEGURIDAD:
-    // Si por alguna razón descTotalParaCotiz da mucho más de lo esperado (ej. > 100), alertar.
-    if (descTotalParaCotiz > 100) {
+    if (porcGdescTotal > 100) {
       console.warn(
-        `[transfencP] ADVERTENCIA: descTotalParaCotiz = ${descTotalParaCotiz} supera el 100%. Revisar lógica de descuentos.`
+        `[transfencP] ADVERTENCIA: porcGdescTotal = ${porcGdescTotal} supera el 100%. Revisar lógica de descuentos.`
       );
     }
 
-    // FIX CLAVE: descrip se genera SIEMPRE en el backend usando descTotalParaCotiz.
-    // Esto garantiza que descrip, porc_gdesc, campo6 sean siempre consistentes
-    // sin importar lo que venga en el body (texto libre, vacío, etc.).
-    const descripFinal = generarDescripPedido(descTotalParaCotiz);
+    // descrip refleja SOLO el descuento del proveedor
+    const descripFinal = generarDescripPedido(descProveedor);
 
     let totBrutoBackend = 0;
     let totIvaBackend = 0;
@@ -716,8 +701,9 @@ export const crearPedidoTransf = async (req, res) => {
       const datosArticulo = await obtenerDatosArticulo(it.co_art);
       const tipo_imp = datosArticulo ? String(datosArticulo.tipo_imp).trim() : "1";
 
+      // El cálculo de IVA usa el descuento total para ser consistente
       const subtotalConDescuento =
-        subtotalBruto - subtotalBruto * (descTotalParaCotiz / 100);
+        subtotalBruto - subtotalBruto * (porcGdescTotal / 100);
 
       if (tipo_imp === "1") {
         totIvaBackend += subtotalConDescuento * 0.16;
@@ -727,7 +713,7 @@ export const crearPedidoTransf = async (req, res) => {
     const totBrutoCalc = Number(totBrutoBackend.toFixed(2));
     const ivaCalc = Number(totIvaBackend.toFixed(2));
     const totNetoCalc = Number(
-      (totBrutoCalc - totBrutoCalc * (descTotalParaCotiz / 100) + ivaCalc).toFixed(2)
+      (totBrutoCalc - totBrutoCalc * (porcGdescTotal / 100) + ivaCalc).toFixed(2)
     );
     const saldoCalc = totNetoCalc;
 
@@ -739,6 +725,7 @@ export const crearPedidoTransf = async (req, res) => {
 
     const fecha_actual = obtenerFechaVenezuelaISO();
 
+    // FIX: se pasan descProveedor y porcGdescTotal por separado
     const pedidoOk = await insertarPedido(
       fact_num,
       cod_cliente,
@@ -749,9 +736,9 @@ export const crearPedidoTransf = async (req, res) => {
       ivaCalc,
       fecha_actual,
       codigo_pedido,
-      descTotalParaCotiz,   // porc_gdesc: el descuento real
-      porc_gdesc_total,
-      descripFinal          // FIX: descrip generado consistentemente en el backend
+      descProveedor,    // -> campo6 y fuente de descrip
+      porcGdescTotal,   // -> porc_gdesc en DB
+      descripFinal      // -> descrip generado
     );
 
     if (!pedidoOk) {
@@ -818,8 +805,8 @@ export const crearPedidoTransf = async (req, res) => {
             saldoCalc,
             ivaCalc,
             String(codigo_pedido),
-            descTotalParaCotiz,
-            descripFinal,   // FIX: guardar también el descrip correcto en MySQL
+            porcGdescTotal,   // FIX: descuento total en MySQL también
+            descripFinal,     // FIX: descrip consistente con el desc. proveedor
             coUsIn,
             fecha_actual,
             Number(tasaForMysql),
@@ -937,4 +924,3 @@ async function obtenerDescGlobCliente(co_cli) {
     ? Number(result[0].desc_glob)
     : 0.0;
 }
-

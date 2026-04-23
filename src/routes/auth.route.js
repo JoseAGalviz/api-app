@@ -1,5 +1,5 @@
 import express from 'express';
-import { loginUser, redirectToFixedIp, redirectToVendedorFixedIp } from '../controllers/facturas-gestion.controller.js';
+import { loginUser, redirectToFixedIp, redirectToVendedorFixedIp, loginKpi } from '../controllers/facturas-gestion.controller.js';
 
 const router = express.Router();
 
@@ -10,6 +10,10 @@ router.post('/login', loginUser);
 router.post('/register', (req, res) => {
   res.json({ message: 'Register endpoint funcionando' });
 });
+
+// Ruta para login KPI
+router.post('/login-kpi', loginKpi);
+
 
 // Ruta para redirigir a IP fija (acepta GET con query y POST con JSON body)
 router.post('/redirect-fixed-ip', redirectToFixedIp);

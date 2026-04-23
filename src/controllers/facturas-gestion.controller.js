@@ -787,3 +787,75 @@ export const redirectToVendedorFixedIp = (req, res) => {
 
   return res.redirect(302, target);
 }
+
+export const loginKpi = async (req, res) => {
+  const pool = getMysqlPool();
+  
+  // 1. Log de entrada (Frontend)
+  console.log("--- Login Request Received ---");
+  console.log("Body:", JSON.stringify(req.body, null, 2));
+
+  if (!pool) return res.status(500).json({ error: "MySQL no conectado" });
+
+  let conn;
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ error: "Usuario y contraseña requeridos" });
+    }
+
+    conn = await pool.getConnection();
+
+    // 2. Consulta a la tabla según la estructura de tu imagen
+    const [rows] = await conn.query(
+      "SELECT username, full_name, role, password_hash FROM app.users WHERE username = ? LIMIT 1",
+      [username]
+    );
+
+    if (!rows || rows.length === 0) {
+      console.log(`[AUTH] Usuario '${username}' no encontrado.`);
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
+
+    const user = rows[0];
+
+    // 3. Log de comparación (Para depuración)
+    console.log("--- Debug Hash ---");
+    console.log("Password ingresada (texto plano):", password);
+    console.log("Hash recuperado de DB:", user.password_hash);
+    
+    const match = await bcrypt.compare(password, user.password_hash);
+    console.log("¿La comparación es exitosa?:", match);
+
+    if (!match) {
+      // --- OPCIONAL: DESCOMENTA ESTO UNA VEZ PARA GENERAR UN HASH VÁLIDO ---
+      /*
+      const nuevoHash = await bcrypt.hash(password, 10);
+      console.log("Generando nuevo hash para actualizar manualmente en DB:");
+      console.log(nuevoHash); 
+      */
+      // -------------------------------------------------------------------
+      
+      console.log(`[AUTH] Password incorrecta para: ${username}`);
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
+
+    // 4. Log y Respuesta de éxito
+    const responseData = {
+      username: user.username,
+      full_name: user.full_name,
+      rol: user.role, // Nota: en tu tabla se llama 'role', el front espera 'rol' o 'role'?
+    };
+
+    console.log("--- Login Response Sent ---");
+    console.log("Data:", JSON.stringify(responseData, null, 2));
+
+    return res.json(responseData);
+    
+  } catch (err) {
+    console.error("Error en el servidor:", err);
+    res.status(500).json({ error: "Error interno" });
+  } finally {
+    if (conn) conn.release();
+  }
+};
