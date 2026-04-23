@@ -1573,11 +1573,9 @@ export const getVentasPorUsuariosProveedor = async (req, res) => {
     if (!proveedor_codigo) {
       return res.status(400).json({ error: "proveedor_codigo requerido" });
     }
-
     const now = new Date();
     const mes  = req.body?.mes  ? Number(req.body.mes)  : now.getMonth() + 1;
     const anio = req.body?.anio ? Number(req.body.anio) : now.getFullYear();
-
     const pool = getTransferenciasPool();
 
     // 1) Obtener usuarios del proveedor
@@ -1606,7 +1604,6 @@ export const getVentasPorUsuariosProveedor = async (req, res) => {
     try {
       const userNames = usuarios.map((u) => u.user);
       const placeholders = userNames.map(() => "?").join(",");
-
       const sql = `
         SELECT
           p.co_us_in                    AS usuario,
@@ -1618,58 +1615,45 @@ export const getVentasPorUsuariosProveedor = async (req, res) => {
           AND YEAR(p.created_at)  = ?
         GROUP BY p.co_us_in
       `;
-
       const [rows] = await pool.execute(sql, [...userNames, mes, anio]);
       const mapa = new Map((rows || []).map((r) => [r.usuario, Number(r.total_unidades || 0)]));
-
-      const resultado = usuarios
-        .map((u) => ({
-          id: u.id,
-          usuario: typeof u.user === "string" ? u.user.trim() : u.user,
-          total_unidades: mapa.get(u.user) || 0,
-          mes,
-          anio,
-        }))
-        .filter((u) => u.total_unidades > 0);
-
+      const resultado = usuarios.map((u) => ({
+        id: u.id,
+        usuario: typeof u.user === "string" ? u.user.trim() : u.user,
+        total_unidades: mapa.get(u.user) || 0,
+        mes,
+        anio,
+      }));
       return res.json(resultado);
-
     } catch (errAgg) {
       console.warn("FALLBACK: agregación por SQL falló, agrego en JS:", errAgg.message);
-
       const [pedidos] = await pool.execute(
         "SELECT id, co_us_in, created_at FROM pedidos WHERE MONTH(created_at) = ? AND YEAR(created_at) = ?",
         [mes, anio]
       );
-
-      if (!pedidos || pedidos.length === 0) {
-        return res.json([]);
-      }
-
-      const pedidoIds = pedidos.map((p) => p.id);
-      const placeholders2 = pedidoIds.map(() => "?").join(",");
-      const [productos] = await pool.execute(
-        `SELECT pedido_id, cantidad FROM pedido_productos WHERE pedido_id IN (${placeholders2})`,
-        pedidoIds
-      );
-
-      const pedidoToUser = new Map(pedidos.map((p) => [p.id, p.co_us_in]));
+      const pedidoToUser = new Map((pedidos || []).map((p) => [p.id, p.co_us_in]));
       const agg = {};
-      for (const prod of productos) {
-        const user = pedidoToUser.get(prod.pedido_id) ?? "";
-        agg[user] = (agg[user] || 0) + Number(prod.cantidad || 0);
+
+      if (pedidos && pedidos.length > 0) {
+        const pedidoIds = pedidos.map((p) => p.id);
+        const placeholders2 = pedidoIds.map(() => "?").join(",");
+        const [productos] = await pool.execute(
+          `SELECT pedido_id, cantidad FROM pedido_productos WHERE pedido_id IN (${placeholders2})`,
+          pedidoIds
+        );
+        for (const prod of productos) {
+          const user = pedidoToUser.get(prod.pedido_id) ?? "";
+          agg[user] = (agg[user] || 0) + Number(prod.cantidad || 0);
+        }
       }
 
-      const resultado = usuarios
-        .map((u) => ({
-          id: u.id,
-          usuario: typeof u.user === "string" ? u.user.trim() : u.user,
-          total_unidades: agg[u.user] || 0,
-          mes,
-          anio,
-        }))
-        .filter((u) => u.total_unidades > 0);
-
+      const resultado = usuarios.map((u) => ({
+        id: u.id,
+        usuario: typeof u.user === "string" ? u.user.trim() : u.user,
+        total_unidades: agg[u.user] || 0,
+        mes,
+        anio,
+      }));
       return res.json(resultado);
     }
   } catch (err) {
