@@ -363,7 +363,7 @@ const getGestionesPromise = async (req) => {
     const hoyStr = new Date().toISOString().slice(0, 10);
     let query = `
             SELECT 
-                c.co_cli, c.cli_des, c.tipo, c.co_seg, c.co_ven, c.nit,
+                c.co_cli, c.cli_des, c.tipo, c.co_seg, c.co_ven, c.nit, c.desc_glob,
                 (SELECT SUM(saldo) FROM factura WHERE co_cli = c.co_cli AND CAST(fec_emis AS DATE) < CAST(fec_venc AS DATE) AND CAST(fec_venc AS DATE) >= @hoy) AS transito,
                 (SELECT SUM(saldo) FROM factura WHERE co_cli = c.co_cli AND CAST(fec_venc AS DATE) < @hoy) AS vencido
             FROM dbo.clientes c
@@ -402,6 +402,7 @@ const getGestionesPromise = async (req) => {
       co_seg: row.co_seg?.trim(),
       co_ven: row.co_ven?.trim(),
       nit: row.nit?.trim(),
+      desc_glob: row.desc_glob ? Number(row.desc_glob).toFixed(2) : "0.00",
       transito: row.transito ? Number(row.transito).toFixed(2) : "0.00",
       vencido: row.vencido ? Number(row.vencido).toFixed(2) : "0.00",
     }));
