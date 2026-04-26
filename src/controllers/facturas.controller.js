@@ -253,28 +253,23 @@ export const updateFacturaFecha = async (req, res) => {
         const fechaFinal = fechaBase.toISOString().split('T')[0];
 
         try {
-            // Consulta campo8 y fec_emis antes de actualizar
-            const selectFactura = `
-                SELECT campo8, CAST(fec_emis AS DATE) AS fec_emis FROM dbo.factura WHERE fact_num = @fact_num
-            `;
+            // Pre-checks (solo lectura, fuera de transacción)
             const selectRequest = new sql.Request();
             selectRequest.input('fact_num', sql.VarChar, num);
-            const selectResult = await selectRequest.query(selectFactura);
+            const selectResult = await selectRequest.query(`
+                SELECT campo8, CAST(fec_emis AS DATE) AS fec_emis FROM dbo.factura WHERE fact_num = @fact_num
+            `);
             const campo8Antes = selectResult.recordset.length ? selectResult.recordset[0].campo8 : null;
             const fec_emis = selectResult.recordset.length ? selectResult.recordset[0].fec_emis : null;
 
-            // Si ya está chequeado, no actualizar ni escanear
             if (campo8Antes && campo8Antes.trim() === 'CHEQUEADO APP') {
                 resultados.push({ fact_num: num, exito: false, error: 'Factura ya escaneada previamente.' });
                 continue;
             }
 
-            // Validación: si han pasado más de 7 días desde fec_emis, bloquear la actualización
             if (fec_emis) {
                 const fechaActual = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
-                const fechaEmision = new Date(fec_emis);
-                const diffMs = fechaActual - fechaEmision;
-                const diffDias = diffMs / (1000 * 60 * 60 * 24);
+                const diffDias = (fechaActual - new Date(fec_emis)) / (1000 * 60 * 60 * 24);
                 if (diffDias > 7) {
                     console.warn(`[BLOQUEADO] fact_num: ${num} supera 1 semana desde fec_emis (${diffDias.toFixed(1)} días). No se actualizará.`);
                     resultados.push({ fact_num: num, exito: false, error: 'La factura supera 1 semana desde su emisión y no puede ser escaneada.' });
@@ -282,57 +277,52 @@ export const updateFacturaFecha = async (req, res) => {
                 }
             }
 
-            // Actualiza fec_venc y campo8 en factura
-            const updateFactura = `
-                UPDATE dbo.factura
-                SET fec_venc = @fec_venc_despues,
-                    campo8 = @campo8
-                WHERE fact_num = @fact_num
-            `;
-            const updateRequest = new sql.Request();
-            updateRequest.input('fec_venc_despues', sql.Date, fechaFinal);
-            updateRequest.input('campo8', sql.VarChar, 'CHEQUEADO APP');
-            updateRequest.input('fact_num', sql.VarChar, num);
-            const updateResult = await updateRequest.query(updateFactura);
+            // Transacción: UPDATE factura + UPDATE docum_cc deben ser atómicos
+            const transaction = new sql.Transaction();
+            await transaction.begin();
+            try {
+                const reqUpdateFactura = new sql.Request(transaction);
+                reqUpdateFactura.input('fec_venc_despues', sql.Date, fechaFinal);
+                reqUpdateFactura.input('campo8', sql.VarChar, 'CHEQUEADO APP');
+                reqUpdateFactura.input('fact_num', sql.VarChar, num);
+                const updateResult = await reqUpdateFactura.query(`
+                    UPDATE dbo.factura
+                    SET fec_venc = @fec_venc_despues,
+                        campo8 = @campo8
+                    WHERE fact_num = @fact_num
+                `);
 
-            // Verifica si se actualizó alguna fila
-            if (!updateResult.rowsAffected || updateResult.rowsAffected[0] === 0) {
-                console.error(`[ERROR] No se actualizó ninguna factura con fact_num: ${num}`);
-                resultados.push({ fact_num: num, exito: false, error: 'No se encontró la factura para actualizar.' });
-                continue;
-            }
+                if (!updateResult.rowsAffected || updateResult.rowsAffected[0] === 0) {
+                    await transaction.rollback();
+                    console.error(`[ERROR] No se actualizó ninguna factura con fact_num: ${num}`);
+                    resultados.push({ fact_num: num, exito: false, error: 'No se encontró la factura para actualizar.' });
+                    continue;
+                }
 
-            // Consulta el valor actualizado de campo8
-            const selectResultDespues = await selectRequest.query(selectFactura);
-            const campo8Despues = selectResultDespues.recordset.length ? selectResultDespues.recordset[0].campo8 : null;
-
-            if (campo8Antes === campo8Despues) {
-                console.warn(`[WARN] campo8 NO CAMBIÓ para fact_num: ${num}`);
-            }
-
-            // Solo actualiza fec_venc en docum_cc
-            const queryDocumCC = `
-                SELECT tipo_doc
-                FROM dbo.docum_cc
-                WHERE nro_doc = @fact_num AND tipo_doc = 'FACT'
-            `;
-            const requestDocumCC = new sql.Request();
-            requestDocumCC.input('fact_num', sql.VarChar, num);
-            const resultDocumCC = await requestDocumCC.query(queryDocumCC);
-
-            if (resultDocumCC.recordset.length) {
-                const updateDocumCC = `
-                    UPDATE dbo.docum_cc
-                    SET fec_venc = @fec_venc_despues
+                const reqSelectDocumCC = new sql.Request(transaction);
+                reqSelectDocumCC.input('fact_num', sql.VarChar, num);
+                const resultDocumCC = await reqSelectDocumCC.query(`
+                    SELECT tipo_doc FROM dbo.docum_cc
                     WHERE nro_doc = @fact_num AND tipo_doc = 'FACT'
-                `;
-                const updateRequestDocumCC = new sql.Request();
-                updateRequestDocumCC.input('fec_venc_despues', sql.Date, fechaFinal);
-                updateRequestDocumCC.input('fact_num', sql.VarChar, num);
-                await updateRequestDocumCC.query(updateDocumCC);
-            }
+                `);
 
-            resultados.push({ fact_num: num, exito: true });
+                if (resultDocumCC.recordset.length) {
+                    const reqUpdateDocumCC = new sql.Request(transaction);
+                    reqUpdateDocumCC.input('fec_venc_despues', sql.Date, fechaFinal);
+                    reqUpdateDocumCC.input('fact_num', sql.VarChar, num);
+                    await reqUpdateDocumCC.query(`
+                        UPDATE dbo.docum_cc
+                        SET fec_venc = @fec_venc_despues
+                        WHERE nro_doc = @fact_num AND tipo_doc = 'FACT'
+                    `);
+                }
+
+                await transaction.commit();
+                resultados.push({ fact_num: num, exito: true });
+            } catch (txErr) {
+                try { await transaction.rollback(); } catch { /* ignore */ }
+                throw txErr;
+            }
         } catch (err) {
             console.error('Error actualizando factura/docum_cc:', err);
             resultados.push({ fact_num: num, exito: false, error: 'Error al actualizar la factura/docum_cc' });

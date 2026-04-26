@@ -34,6 +34,13 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
   next();
 });
+
+app.use((req, res, next) => {
+  res.setTimeout(25000, () => {
+    if (!res.headersSent) res.status(503).json({ error: 'Request timeout' });
+  });
+  next();
+});
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -77,7 +84,12 @@ const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-// Reconexión automática SQL Server cada 5 min si cae
+// Kill hanging requests after 30s
+server.timeout = 30000;
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+
+// Reconexión automática SQL Server cada 60s si cae
 setInterval(async () => {
   try {
     await new sql.Request().query('SELECT 1');
@@ -85,7 +97,7 @@ setInterval(async () => {
     console.error('[DB] SQL Server desconectado — reconectando...');
     await reconnectSQL();
   }
-}, 5 * 60 * 1000);
+}, 60 * 1000);
 
 // Graceful shutdown
 async function shutdown(signal) {
