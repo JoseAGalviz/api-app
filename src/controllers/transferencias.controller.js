@@ -678,6 +678,7 @@ export const getTotalGeneralProveedor = async (req, res) => {
 };
 
 export const getRenglonesFactura = async (req, res) => {
+  res.setTimeout(120000);
   try {
     const nro_doc  = req.query?.nro_doc  ?? req.body?.nro_doc;
     const co_cli   = req.query?.co_cli   ?? req.body?.co_cli;
@@ -706,8 +707,7 @@ export const getRenglonesFactura = async (req, res) => {
     const whereClauses = [
       "(f.campo5 = @cod_prov OR f.campo5 LIKE @cod_prov + ',%')",
       "f.campo6 IS NOT NULL",
-      "LTRIM(RTRIM(f.campo6)) <> ''",
-      "TRY_CAST(f.campo6 AS FLOAT) IS NOT NULL"
+      "f.campo6 <> ''"
     ];
     if (nro_doc) whereClauses.push("f.nro_doc = @nro_doc");
     if (co_cli)  whereClauses.push("f.co_cli = @co_cli");
@@ -760,8 +760,10 @@ export const getRenglonesFactura = async (req, res) => {
     if (startDateObj) request.input("startDate", sql.DateTime, startDateObj);
     if (endDateObj)   request.input("endDate",   sql.DateTime, endDateObj);
 
+    const isValidFloat = (v) => v != null && String(v).trim() !== '' && !isNaN(parseFloat(String(v).trim()));
+
     const result = await request.query(query);
-    let recordset = result.recordset;
+    let recordset = result.recordset.filter(r => isValidFloat(r.campo6));
     let usedFallback = false;
 
     // ─── Fallback: buscar en cotiz_c ─────────────────────────────────────────
@@ -771,8 +773,7 @@ export const getRenglonesFactura = async (req, res) => {
       const whereClausesCotiz = [
         "(c.campo5 = @cod_prov OR c.campo5 LIKE @cod_prov + ',%')",
         "c.campo6 IS NOT NULL",
-        "LTRIM(RTRIM(c.campo6)) <> ''",
-        "TRY_CAST(c.campo6 AS FLOAT) IS NOT NULL",
+        "c.campo6 <> ''",
         "r.TIPO_DOC = 'T'"
       ];
       if (nro_doc) whereClausesCotiz.push("c.fact_num = @nro_doc");
@@ -827,7 +828,7 @@ export const getRenglonesFactura = async (req, res) => {
       if (endDateObj)   requestCotiz.input("endDate",   sql.DateTime, endDateObj);
 
       const resultCotiz = await requestCotiz.query(queryCotiz);
-      recordset = resultCotiz.recordset;
+      recordset = resultCotiz.recordset.filter(r => isValidFloat(r.campo6));
     }
 
     // ─── Agrupar por factura ──────────────────────────────────────────────────
