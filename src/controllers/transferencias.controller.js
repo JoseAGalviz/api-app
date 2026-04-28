@@ -715,20 +715,26 @@ export const getRenglonesFactura = async (req, res) => {
     whereClauses.push("f.fec_emis <= @endDate");
 
     const query = `
-      SELECT 
-        f.fact_num, 
+      SELECT
+        f.fact_num,
         f.co_cli,
-        f.campo5, 
+        f.campo5,
         f.campo6,
         f.fec_emis,
         ROUND(
-          CASE WHEN f.tasa IS NULL OR f.tasa = 0 
-              THEN f.tot_neto 
-              ELSE f.tot_neto / f.tasa 
+          CASE WHEN f.tasa IS NULL OR f.tasa = 0
+              THEN f.tot_neto
+              ELSE f.tot_neto / f.tasa
           END, 2
         ) AS tot_neto,
         f.tasa,
         f.tot_bruto,
+        f.tot_neto AS tot_neto_raw,
+        f.co_ven,
+        f.glob_desc,
+        f.iva,
+        f.status,
+        f.anulada,
         c.cli_des,
         c.rif,
         r.reng_num,
@@ -756,9 +762,11 @@ export const getRenglonesFactura = async (req, res) => {
 
     const result = await request.query(query);
     let recordset = result.recordset;
+    let usedFallback = false;
 
-    // ─── Fallback: buscar en cotiz_c ──────────────────────────────────────────
+    // ─── Fallback: buscar en cotiz_c ─────────────────────────────────────────
     if (recordset.length === 0) {
+      usedFallback = true;
 
       const whereClausesCotiz = [
         "(c.campo5 = @cod_prov OR c.campo5 LIKE @cod_prov + ',%')",
@@ -773,20 +781,26 @@ export const getRenglonesFactura = async (req, res) => {
       whereClausesCotiz.push("c.fec_emis <= @endDate");
 
       const queryCotiz = `
-        SELECT 
-          c.fact_num, 
+        SELECT
+          c.fact_num,
           c.co_cli,
-          c.campo5, 
+          c.campo5,
           c.campo6,
           c.fec_emis,
           ROUND(
-            CASE WHEN c.tasa IS NULL OR c.tasa = 0 
-                THEN c.tot_neto 
-                ELSE c.tot_neto / c.tasa 
+            CASE WHEN c.tasa IS NULL OR c.tasa = 0
+                THEN c.tot_neto
+                ELSE c.tot_neto / c.tasa
             END, 2
           ) AS tot_neto,
           c.tasa,
           c.tot_bruto,
+          c.tot_neto AS tot_neto_raw,
+          NULL AS co_ven,
+          NULL AS glob_desc,
+          NULL AS iva,
+          NULL AS status,
+          NULL AS anulada,
           cl.cli_des,
           cl.rif,
           r.reng_num,
@@ -816,79 +830,7 @@ export const getRenglonesFactura = async (req, res) => {
       recordset = resultCotiz.recordset;
     }
 
-    // ─── Cache de nit (sicm) por co_cli ───────────────────────────────────────
-    const sicmCache = {};
-
-    const getSicm = async (coCliVal) => {
-      const key = safeStr(coCliVal);
-      if (!key) return null;
-      if (sicmCache[key] !== undefined) return sicmCache[key];
-
-      try {
-        const reqCli = new sql.Request();
-        reqCli.input("co_cli", sql.VarChar, key);
-        const resCli = await reqCli.query(
-          "SELECT LTRIM(RTRIM(nit)) AS nit FROM clientes WHERE co_cli = @co_cli"
-        );
-        const nit = safeStr(resCli.recordset?.[0]?.nit) ?? null;
-        sicmCache[key] = nit;
-        return nit;
-      } catch (e) {
-        console.error(`  [sicm] Error buscando nit para co_cli="${key}":`, e.message);
-        sicmCache[key] = null;
-        return null;
-      }
-    };
-
-    // ─── Cache de campo4 (cod_bar) por co_art ─────────────────────────────────
-    const codBarCache = {};
-
-    const getCodBar = async (coArtVal) => {
-      const key = safeStr(coArtVal);
-      if (!key) return null;
-      if (codBarCache[key] !== undefined) return codBarCache[key];
-
-      try {
-        const reqArt = new sql.Request();
-        reqArt.input("co_art", sql.VarChar, key);
-        const resArt = await reqArt.query(
-          "SELECT LTRIM(RTRIM(campo4)) AS campo4 FROM art WHERE co_art = @co_art"
-        );
-        const campo4 = safeStr(resArt.recordset?.[0]?.campo4) ?? null;
-        codBarCache[key] = campo4;
-        return campo4;
-      } catch (e) {
-        console.error(`  [cod_bar] Error buscando campo4 para co_art="${key}":`, e.message);
-        codBarCache[key] = null;
-        return null;
-      }
-    };
-
-    // ─── Cache de art_des por co_art (para pedidos_productos) ─────────────────
-    const artDesCache = {};
-
-    const getArtDes = async (coArtVal) => {
-      const key = safeStr(coArtVal);
-      if (!key) return null;
-      if (artDesCache[key] !== undefined) return artDesCache[key];
-
-      try {
-        const reqArt = new sql.Request();
-        reqArt.input("co_art", sql.VarChar, key);
-        const resArt = await reqArt.query(
-          "SELECT LTRIM(RTRIM(art_des)) AS art_des FROM art WHERE co_art = @co_art"
-        );
-        const artDes = safeStr(resArt.recordset?.[0]?.art_des) ?? null;
-        artDesCache[key] = artDes;
-        return artDes;
-      } catch (e) {
-        console.error(`  [art_des] Error buscando art_des para co_art="${key}":`, e.message);
-        artDesCache[key] = null;
-        return null;
-      }
-    };
-
-    // ─── Agrupar por factura ───────────────────────────────────────────────────
+    // ─── Agrupar por factura ──────────────────────────────────────────────────
     const facturasMap = {};
     recordset.forEach((row) => {
       const cleanRow = cleanStrings(row);
@@ -901,20 +843,28 @@ export const getRenglonesFactura = async (req, res) => {
       if (!facturasMap[fact_num]) {
         facturasMap[fact_num] = {
           fact_num,
-          co_cli:    safeStr(rowCoCli),
+          co_cli:         safeStr(rowCoCli),
           cli_des,
           campo5,
           campo6,
           fec_emis,
-          tot_neto:  tot_neto_val,
-          rif:       rif ?? null,
-          sicm:      null,
-          tasa:      tasa != null && tasa !== "" ? Number(Number(tasa).toFixed(2)) : null,
-          tot_bruto: tot_bruto != null ? Number(tot_bruto) : tot_bruto,
-          co_us_in:  null,
-          pedido_num: null,
-          db_mysql:  [],
-          articulos: [],
+          tot_neto:       tot_neto_val,
+          rif:            rif ?? null,
+          sicm:           null,
+          tasa:           tasa != null && tasa !== "" ? Number(Number(tasa).toFixed(2)) : null,
+          tot_bruto:      tot_bruto != null ? Number(tot_bruto) : tot_bruto,
+          co_us_in:       null,
+          pedido_num:     null,
+          db_mysql:       [],
+          articulos:      [],
+          _source:        usedFallback ? 'cotiz_c' : 'factura',
+          _raw_tot_neto:  cleanRow.tot_neto_raw ?? null,
+          _co_ven:        safeStr(cleanRow.co_ven) ?? "",
+          _glob_desc:     cleanRow.glob_desc ?? null,
+          _iva:           cleanRow.iva ?? null,
+          _status:        safeStr(cleanRow.status) ?? "",
+          _anulada:       cleanRow.anulada ?? null,
+          _raw_articulos: [],
         };
       }
 
@@ -947,190 +897,243 @@ export const getRenglonesFactura = async (req, res) => {
         art_des:   (cleanRow.art_des ?? "").trim(),
         cod_bar:   null,
       });
+
+      facturasMap[fact_num]._raw_articulos.push({
+        reng_num,
+        co_art,
+        total_art: total_art != null ? Number(total_art) : total_art,
+        prec_vta:  parseNumber(prec_vta),
+        porc_desc,
+        reng_neto: parseNumber(reng_neto),
+        art_des:   (cleanRow.art_des ?? "").trim(),
+      });
     });
 
     const facturasArray = Object.values(facturasMap);
 
-    // ─── Rellenar sicm y cod_bar ───────────────────────────────────────────────
-    for (const f of facturasArray) {
-      f.sicm = await getSicm(f.co_cli);
+    // ─── BATCH: nit, direc1, tipo para todos los co_cli únicos ──────────────
+    const uniqueCoCliList = [...new Set(facturasArray.map(f => safeStr(f.co_cli)).filter(Boolean))];
+    const sicmMap = {};
+    const clienteDetalleMap = {};
+    if (uniqueCoCliList.length > 0) {
+      try {
+        const inParams = uniqueCoCliList.map((_, i) => `@c${i}`).join(",");
+        const reqSicm = new sql.Request();
+        uniqueCoCliList.forEach((v, i) => reqSicm.input(`c${i}`, sql.VarChar, v));
+        const resSicm = await reqSicm.query(
+          `SELECT LTRIM(RTRIM(co_cli)) AS co_cli, LTRIM(RTRIM(nit)) AS nit,
+                  LTRIM(RTRIM(direc1)) AS direc1, LTRIM(RTRIM(tipo)) AS tipo
+           FROM clientes WHERE co_cli IN (${inParams})`
+        );
+        resSicm.recordset.forEach(r => {
+          const k = safeStr(r.co_cli);
+          sicmMap[k] = safeStr(r.nit);
+          clienteDetalleMap[k] = {
+            nit:    safeStr(r.nit),
+            direc1: safeStr(r.direc1),
+            tipo:   safeStr(r.tipo),
+          };
+        });
+      } catch (e) {
+        console.error("[batch sicm] Error:", e.message);
+      }
+    }
+    facturasArray.forEach(f => { f.sicm = sicmMap[safeStr(f.co_cli)] ?? null; });
 
-      for (const art of f.articulos) {
-        art.cod_bar = await getCodBar(art.co_art);
+    // ─── BATCH: cod_bar (campo4) para todos los co_art únicos ────────────────
+    const uniqueCoArtList = [...new Set(
+      facturasArray.flatMap(f => f.articulos.map(a => safeStr(a.co_art))).filter(Boolean)
+    )];
+    const codBarMap = {};
+    if (uniqueCoArtList.length > 0) {
+      try {
+        const inParams = uniqueCoArtList.map((_, i) => `@a${i}`).join(",");
+        const reqBar = new sql.Request();
+        uniqueCoArtList.forEach((v, i) => reqBar.input(`a${i}`, sql.VarChar, v));
+        const resBar = await reqBar.query(
+          `SELECT LTRIM(RTRIM(co_art)) AS co_art, LTRIM(RTRIM(campo4)) AS campo4
+           FROM art WHERE co_art IN (${inParams})`
+        );
+        resBar.recordset.forEach(r => { codBarMap[safeStr(r.co_art)] = safeStr(r.campo4); });
+      } catch (e) {
+        console.error("[batch cod_bar] Error:", e.message);
+      }
+    }
+    facturasArray.forEach(f => {
+      f.articulos.forEach(art => { art.cod_bar = codBarMap[safeStr(art.co_art)] ?? null; });
+    });
+
+    // ─── BATCH PASO 1: reng_fac → num_doc para todos los fact_num ────────────
+    const allFactNums = facturasArray.map(f => safeStr(f.fact_num)).filter(Boolean);
+    const rengFacMap = {};
+    if (allFactNums.length > 0) {
+      try {
+        const inParams = allFactNums.map((_, i) => `@f${i}`).join(",");
+        const reqRF = new sql.Request();
+        allFactNums.forEach((v, i) => reqRF.input(`f${i}`, sql.VarChar, v));
+        const resRF = await reqRF.query(
+          `SELECT LTRIM(RTRIM(fact_num)) AS fact_num, LTRIM(RTRIM(num_doc)) AS num_doc
+           FROM reng_fac
+           WHERE LTRIM(RTRIM(fact_num)) IN (${inParams})`
+        );
+        resRF.recordset.forEach(r => {
+          const k = safeStr(r.fact_num);
+          if (k && !rengFacMap[k]) rengFacMap[k] = safeStr(r.num_doc);
+        });
+      } catch (e) {
+        console.error("[batch reng_fac] Error:", e.message);
       }
     }
 
-    // ─── Rastrear co_us_in, pedido_num, db_mysql para cada factura ────────────
-    for (const f of facturasArray) {
+    // ─── BATCH PASO 2: reng_nde → num_doc ────────────────────────────────────
+    const paso1Docs = [...new Set(Object.values(rengFacMap).filter(Boolean))];
+    const rengNdeMap = {};
+    if (paso1Docs.length > 0) {
       try {
-        const factNumLimpio = safeStr(f.fact_num);
+        const inParams = paso1Docs.map((_, i) => `@n${i}`).join(",");
+        const reqRN = new sql.Request();
+        paso1Docs.forEach((v, i) => reqRN.input(`n${i}`, sql.VarChar, v));
+        const resRN = await reqRN.query(
+          `SELECT LTRIM(RTRIM(fact_num)) AS fact_num, LTRIM(RTRIM(num_doc)) AS num_doc
+           FROM reng_nde
+           WHERE LTRIM(RTRIM(fact_num)) IN (${inParams})`
+        );
+        resRN.recordset.forEach(r => {
+          const k = safeStr(r.fact_num);
+          if (k && !rengNdeMap[k]) rengNdeMap[k] = safeStr(r.num_doc);
+        });
+      } catch (e) {
+        console.error("[batch reng_nde] Error:", e.message);
+      }
+    }
 
-        // ── PASO 1 ─────────────────────────────────────────────────────────────
-        const req1 = new sql.Request();
-        req1.input("p_fact_num", sql.VarChar, factNumLimpio);
+    facturasArray.forEach(f => {
+      const numDoc1 = rengFacMap[safeStr(f.fact_num)];
+      if (numDoc1) {
+        const numDoc2 = rengNdeMap[numDoc1];
+        if (numDoc2) f.pedido_num = numDoc2;
+      }
+    });
 
-        const res1 = await req1.query(`
-          SELECT TOP 1 LTRIM(RTRIM(num_doc)) AS num_doc
-          FROM reng_fac
-          WHERE LTRIM(RTRIM(fact_num)) = @p_fact_num
-        `);
+    // ─── BATCH PASO 3: MySQL pedidos + pedido_productos ───────────────────────
+    const allPedidoNums = [...new Set(facturasArray.map(f => f.pedido_num).filter(Boolean))];
+    const pedidoMap   = {};
+    const productosMap = {};
+    if (allPedidoNums.length > 0) {
+      try {
+        const placeholders = allPedidoNums.map(() => "TRIM(fact_num) = ?").join(" OR ");
+        const [pedRows] = await getTransferenciasPool().execute(
+          `SELECT co_us_in, fact_num FROM pedidos WHERE ${placeholders} LIMIT ${allPedidoNums.length * 2}`,
+          allPedidoNums
+        );
+        pedRows.forEach(r => {
+          const k = safeStr(r.fact_num);
+          if (k) pedidoMap[k] = { co_us_in: safeStr(r.co_us_in), fact_num: k };
+        });
 
-        const numDoc1 = safeStr(res1.recordset?.[0]?.num_doc);
-        if (!numDoc1) {
-          continue;
-        }
-
-        // ── PASO 2 ─────────────────────────────────────────────────────────────
-        const req2 = new sql.Request();
-        req2.input("p_nde_fact_num", sql.VarChar, numDoc1);
-
-        const res2 = await req2.query(`
-          SELECT TOP 1 LTRIM(RTRIM(num_doc)) AS num_doc
-          FROM reng_nde
-          WHERE LTRIM(RTRIM(fact_num)) = @p_nde_fact_num
-        `);
-
-        const numDoc2 = safeStr(res2.recordset?.[0]?.num_doc);
-        if (!numDoc2) {
-          continue;
-        }
-
-        f.pedido_num = numDoc2;
-
-        // ── PASO 3 ─────────────────────────────────────────────────────────────
-        try {
-          const [rows] = await getTransferenciasPool().execute(
-            `SELECT co_us_in, fact_num FROM pedidos WHERE TRIM(fact_num) = ? LIMIT 1`,
-            [numDoc2]
+        const mysqlFactNums = [...new Set(pedRows.map(r => safeStr(r.fact_num)).filter(Boolean))];
+        if (mysqlFactNums.length > 0) {
+          const ph2 = mysqlFactNums.map(() => "TRIM(fact_num) = ?").join(" OR ");
+          const [prodRows] = await getTransferenciasPool().execute(
+            `SELECT fact_num, co_art, cantidad, precio, subtotal, created_at FROM pedido_productos WHERE ${ph2}`,
+            mysqlFactNums
           );
 
-          if (rows?.length > 0) {
-            f.co_us_in = safeStr(rows[0].co_us_in);
-
-            const pedidoFactNum = safeStr(rows[0].fact_num);
-
-            // ── Buscar productos en pedidos_productos ──────────────────────────
+          // BATCH: art_des para todos los co_art de productos
+          const prodCoArts = [...new Set(prodRows.map(p => safeStr(p.co_art)).filter(Boolean))];
+          const artDesMap = {};
+          if (prodCoArts.length > 0) {
             try {
-              const [productos] = await getTransferenciasPool().execute(
-                `SELECT fact_num, co_art, cantidad, precio, subtotal, created_at
-                 FROM pedido_productos
-                 WHERE TRIM(fact_num) = ?`,
-                [pedidoFactNum]
+              const inParams = prodCoArts.map((_, i) => `@d${i}`).join(",");
+              const reqAD = new sql.Request();
+              prodCoArts.forEach((v, i) => reqAD.input(`d${i}`, sql.VarChar, v));
+              const resAD = await reqAD.query(
+                `SELECT LTRIM(RTRIM(co_art)) AS co_art, LTRIM(RTRIM(art_des)) AS art_des
+                 FROM art WHERE co_art IN (${inParams})`
               );
-
-              if (productos?.length > 0) {
-                const db_mysql = [];
-                for (const prod of productos) {
-                  const art_des = await getArtDes(prod.co_art);
-                  db_mysql.push({
-                    fact_num:   safeStr(prod.fact_num),
-                    co_art:     safeStr(prod.co_art),
-                    art_des:    art_des,
-                    cantidad:   prod.cantidad,
-                    precio:     prod.precio,
-                    subtotal:   prod.subtotal,
-                    created_at: prod.created_at,
-                  });
-                }
-                f.db_mysql = db_mysql;
-              } else {
-                f.db_mysql = [];
-              }
-            } catch (errProductos) {
-              console.error(`  [PASO 3] Error consultando pedidos_productos:`, errProductos.message || errProductos);
-              f.db_mysql = [];
+              resAD.recordset.forEach(r => { artDesMap[safeStr(r.co_art)] = safeStr(r.art_des); });
+            } catch (e) {
+              console.error("[batch art_des] Error:", e.message);
             }
-
-          } else {
-            f.co_us_in = null;
-            f.db_mysql  = [];
           }
-        } catch (errMysql) {
-          console.error(`  [PASO 3] Error MySQL:`, errMysql.message || errMysql);
-          f.co_us_in = null;
-          f.db_mysql  = [];
+
+          prodRows.forEach(prod => {
+            const k = safeStr(prod.fact_num);
+            if (!productosMap[k]) productosMap[k] = [];
+            productosMap[k].push({
+              fact_num:   k,
+              co_art:     safeStr(prod.co_art),
+              art_des:    artDesMap[safeStr(prod.co_art)] ?? null,
+              cantidad:   prod.cantidad,
+              precio:     prod.precio,
+              subtotal:   prod.subtotal,
+              created_at: prod.created_at,
+            });
+          });
         }
-
-        // ── PASO 4 (info_profit adicional, opcional) ───────────────────────────
-        try {
-          const requestTrace = new sql.Request();
-          requestTrace.input("pedidoFactNum", sql.VarChar, factNumLimpio);
-          requestTrace.input("codCliente",    sql.VarChar, safeStr(f.co_cli) ?? "");
-
-          const traceResult = await requestTrace.query(traceQuery);
-          let clienteDetalle = null;
-
-          if (traceResult.recordsets?.[0]?.length > 0) {
-            const encabezado = traceResult.recordsets[0][0];
-            const renglones  = traceResult.recordsets[1] || [];
-
-            if (encabezado.co_cli) {
-              try {
-                const reqCli = new sql.Request();
-                reqCli.input("co_cli", sql.VarChar, safeStr(encabezado.co_cli));
-                const resCli = await reqCli.query(
-                  "SELECT cli_des, rif, nit, direc1, tipo FROM clientes WHERE co_cli = @co_cli"
-                );
-                if (resCli.recordset?.length > 0) {
-                  const c = resCli.recordset[0];
-                  clienteDetalle = {
-                    cli_des: safeStr(c.cli_des),
-                    rif:     safeStr(c.rif),
-                    nit:     safeStr(c.nit),
-                    direc1:  safeStr(c.direc1),
-                    tipo:    safeStr(c.tipo)
-                  };
-                }
-              } catch (eCli) {
-                console.error("  [PASO 4] Error buscando cliente:", eCli.message);
-              }
-            }
-
-            f.info_profit = {
-              encontrado: true,
-              factura: {
-                fact_num:  safeStr(encabezado.fact_num),
-                co_cli:    safeStr(encabezado.co_cli)  ?? "",
-                tot_neto:  encabezado.tot_neto,
-                tot_brut:  encabezado.tot_bruto,
-                fec_emis:  encabezado.fec_emis,
-                co_ven:    safeStr(encabezado.co_ven)  ?? "",
-                glob_desc: encabezado.glob_desc,
-                iva:       encabezado.iva,
-                status:    safeStr(encabezado.status)  ?? "",
-                anulada:   encabezado.anulada,
-                tasa:      encabezado.tasa
-              },
-              cliente: clienteDetalle ?? null,
-              renglones_factura: renglones.map(r => {
-                const limpio = {};
-                for (const key in r) {
-                  limpio[key] = typeof r[key] === 'string' ? r[key].trim() : r[key];
-                }
-                return limpio;
-              })
-            };
-
-          } else {
-            f.info_profit = {
-              encontrado:     false,
-              mensaje:        "No se encontró la cadena Pedido -> NDE -> Factura",
-              debug_fact_num: f.fact_num
-            };
-          }
-        } catch (errTrace) {
-          console.error(`  [PASO 4] Error info_profit:`, errTrace.message || errTrace);
-        }
-
-      } catch (errGlobal) {
-        console.error(`ERROR rastreando fact_num="${f.fact_num}":`, errGlobal.message || errGlobal);
-        f.co_us_in   = null;
-        f.pedido_num = null;
-        f.db_mysql   = [];
+      } catch (errMysql) {
+        console.error("[batch MySQL] Error:", errMysql.message);
       }
     }
 
-    // ─── Consulta adicional a Profit: facturas con status = 2 ─────────────────
+    facturasArray.forEach(f => {
+      if (!f.pedido_num) { f.co_us_in = null; f.db_mysql = []; return; }
+      const ped = pedidoMap[f.pedido_num];
+      if (ped) {
+        f.co_us_in = ped.co_us_in;
+        f.db_mysql = productosMap[ped.fact_num] ?? [];
+      } else {
+        f.co_us_in = null;
+        f.db_mysql = [];
+      }
+    });
+
+    // ─── PASO 4: construir info_profit desde datos ya cargados ───────────────
+    facturasArray.forEach(f => {
+      if (f._source === 'factura') {
+        const cliDetalle = clienteDetalleMap[safeStr(f.co_cli)];
+        f.info_profit = {
+          encontrado: true,
+          factura: {
+            fact_num:  safeStr(f.fact_num),
+            co_cli:    f.co_cli ?? "",
+            tot_neto:  f._raw_tot_neto,
+            tot_brut:  f.tot_bruto,
+            fec_emis:  f.fec_emis,
+            co_ven:    f._co_ven,
+            glob_desc: f._glob_desc,
+            iva:       f._iva,
+            status:    f._status,
+            anulada:   f._anulada,
+            tasa:      f.tasa,
+          },
+          cliente: cliDetalle ? {
+            cli_des: f.cli_des,
+            rif:     f.rif,
+            nit:     cliDetalle.nit,
+            direc1:  cliDetalle.direc1,
+            tipo:    cliDetalle.tipo,
+          } : null,
+          renglones_factura: f._raw_articulos,
+        };
+      } else {
+        f.info_profit = {
+          encontrado:     false,
+          mensaje:        "No se encontró la cadena Pedido -> NDE -> Factura",
+          debug_fact_num: f.fact_num,
+        };
+      }
+      delete f._source;
+      delete f._raw_tot_neto;
+      delete f._co_ven;
+      delete f._glob_desc;
+      delete f._iva;
+      delete f._status;
+      delete f._anulada;
+      delete f._raw_articulos;
+    });
+
+    // ─── Consulta adicional: facturas Profit con status = 2 ──────────────────
     try {
       let profitQuery = `
         SELECT fact_num, saldo, fec_emis, co_cli, tot_neto, tasa
