@@ -47,6 +47,7 @@ app.use(express.urlencoded({ extended: true }));
 connectDB("remote");
 connectDB("local");
 connectDB("negociaciones");
+connectDB("comparador");
 
 // Health check (público)
 app.get("/health", async (req, res) => {

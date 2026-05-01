@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { sql } from '../config/database.js';
+import { sql, getComparadorPool } from '../config/database.js';
 
 export const getFacturasPorSegmento = async (req, res) => {
   try {
@@ -366,3 +366,97 @@ export const getFacturasPorSegmento = async (req, res) => {
   }
 };
 
+export const ListadorNegociacionesProfit = async (req, res) => {
+  const { co_cat, campo3 } = req.body;
+
+  // Validaci�n de par�metros obligatorios
+  if (!co_cat) {
+    return res.status(400).json({ message: "Falta el par�metro 'co_cat' para Profit." });
+  }
+
+  // --- CONSULTA A SQL SERVER (PROFIT) ---
+  let resultProfit = [];
+  try {
+    const request = new sql.Request();
+
+    // Manejo de array para co_cat (cl�usula IN)
+    let coCatArray = Array.isArray(co_cat) ? co_cat : [co_cat];
+    let inClauseParams = [];
+    coCatArray.forEach((cat, index) => {
+      const paramName = `cat${index}`;
+      request.input(paramName, sql.VarChar, String(cat).trim());
+      inClauseParams.push(`@${paramName}`);
+    });
+
+    // Manejo de campo3 opcional
+    let campo3Filter = "";
+    if (campo3 !== undefined && campo3 !== null) {
+      request.input("campo3", sql.Int, campo3);
+      campo3Filter = "AND a.campo3 = @campo3";
+    }
+
+    const queryProfit = `
+      SELECT
+        DISTINCT a.co_art, a.art_des, a.tipo_imp, a.stock_act, a.campo4, 
+        ( 
+          a.prec_agr3 * ((100 - COALESCE(d_art.porc1, 0)) / 100 ) * ((100 - COALESCE(d_cat.porc1, 0)) / 100) * ((100 - COALESCE(d_lin.porc1, 0)) / 100) 
+        ) AS preciof 
+      FROM art AS a 
+      LEFT JOIN descuen AS d_art ON a.co_art = d_art.co_desc AND d_art.tipo_desc = '1' 
+      LEFT JOIN descuen AS d_cat ON a.co_cat = d_cat.co_desc AND d_cat.tipo_desc = '2' 
+      LEFT JOIN descuen AS d_lin ON a.co_lin = d_lin.co_desc AND d_lin.tipo_desc = '3' 
+      WHERE a.stock_act > 0 
+        AND a.co_cat IN (${inClauseParams.join(',')})
+        ${campo3Filter}
+      ORDER BY a.art_des ASC
+    `;
+
+    const result = await request.query(queryProfit);
+
+    // Limpieza inicial de datos de Profit
+    resultProfit = result.recordset.map(item => ({
+      co_art: item.co_art ? String(item.co_art).trim() : "",
+      art_des: item.art_des ? String(item.art_des).trim() : "",
+      tipo_imp: item.tipo_imp ? String(item.tipo_imp).trim() : "",
+      stock_act: item.stock_act,
+      campo4: item.campo4 ? String(item.campo4).trim() : "",
+      preciof: item.preciof
+    }));
+
+    res.json({
+      data: resultProfit,
+      error: null
+    });
+
+  } catch (err) {
+    console.error("Error en Profit:", err);
+    return res.status(500).json({ message: "Error consultando Profit", error: err.message });
+  }
+};
+
+export const ListadorNegociacionesComparador = async (req, res) => {
+  const { barra, cod_comp } = req.body;
+
+  if (!cod_comp) {
+    return res.status(400).json({ message: "Falta el par�metro 'cod_comp'." });
+  }
+  if (!barra) {
+    return res.status(400).json({ message: "Falta el par�metro 'barra'." });
+  }
+
+  try {
+    const pool = getComparadorPool();
+    const [rows] = await pool.execute(
+      'SELECT precio FROM productos WHERE barra = ? AND cod_comp = ?',
+      [barra, cod_comp]
+    );
+
+    const precio = rows.length > 0 ? rows[0].precio : null;
+
+    res.json({ barra, precio });
+
+  } catch (err) {
+    console.error("Error en MySQL:", err);
+    res.status(500).json({ barra, precio: null, error: err.message });
+  }
+};

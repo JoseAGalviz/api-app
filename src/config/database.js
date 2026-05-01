@@ -50,12 +50,26 @@ export const mssqlConfig = {
 
 export let mysqlPool = null;
 export let negociacionesPool = null;
+export let comparadorPool = null;
 
 export const negociacionesConfig = {
   host: process.env.DB_NEG_HOST,
   user: process.env.DB_NEG_USER,
   password: process.env.DB_NEG_PASSWORD,
   database: 'negociaciones',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 50,
+  connectTimeout: 10000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+};
+
+export const comparadorConfig = {
+  host: process.env.DB_VISOR_HOST,
+  user: process.env.DB_VISOR_USER,
+  password: process.env.DB_VISOR_PASSWORD,
+  database: 'comparador',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 50,
@@ -72,6 +86,9 @@ export async function connectDB(configType = 'remote') {
     } else if (configType === 'negociaciones') {
       negociacionesPool = mysql.createPool(negociacionesConfig);
       console.log('Conexión exitosa a MySQL (negociaciones)');
+    } else if (configType === 'comparador') {
+      comparadorPool = mysql.createPool(comparadorConfig);
+      console.log('Conexión exitosa a MySQL (comparador)');
     } else {
       await sql.connect(remoteConfig);
       console.log('Conexión exitosa a SQL Server (remoto)');
@@ -82,7 +99,7 @@ export async function connectDB(configType = 'remote') {
 }
 
 export async function checkDBHealth() {
-  const status = { sqlServer: false, mysql: false, negociaciones: false };
+  const status = { sqlServer: false, mysql: false, negociaciones: false, comparador: false };
   try {
     await new sql.Request().query('SELECT 1');
     status.sqlServer = true;
@@ -96,6 +113,11 @@ export async function checkDBHealth() {
   try {
     const conn = await negociacionesPool?.getConnection();
     if (conn) { conn.release(); status.negociaciones = true; }
+  } catch { /* down */ }
+
+  try {
+    const conn = await comparadorPool?.getConnection();
+    if (conn) { conn.release(); status.comparador = true; }
   } catch { /* down */ }
 
   return status;
@@ -114,6 +136,10 @@ export function getMysqlPool() {
 
 export function getNegociacionesPool() {
   return negociacionesPool;
+}
+
+export function getComparadorPool() {
+  return comparadorPool;
 }
 
 export { sql };
