@@ -1002,7 +1002,7 @@ export const getKpiMetas = async (req, res) => {
 
     // Filtros adicionales
 
-    const { id, segmento, nombre, co_ven, limit = 100 } = req.query || {};
+    const { id, segmento, nombre, co_ven, limit = 100 } = { ...(req.body || {}), ...(req.query || {}) };
 
     const where = [];
 

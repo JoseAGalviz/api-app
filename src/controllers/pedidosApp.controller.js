@@ -344,10 +344,11 @@ export const getCatalogo = async (req, res) => {
 
     // Soporta tanto parámetros por URL (GET) como por el cuerpo de la petición (POST)
     const co_prov_input = req.query.co_prov ?? req.body?.co_prov;
-    const precio_num = parseInt(
-      req.query.precio_num ?? req.body?.precio_num,
-      10,
-    );
+    const precio_num_raw = req.query.precio_num ?? req.body?.precio_num;
+    const precio_num = parseInt(String(precio_num_raw ?? "").trim(), 10);
+    if (precio_num_raw !== undefined && precio_num_raw !== null && (isNaN(precio_num) || precio_num < 1 || precio_num > 4)) {
+      return res.status(400).json({ error: `precio_num inválido: "${precio_num_raw}". Debe ser 1, 2, 3 o 4.` });
+    }
 
     // Mapeo dinámico de campos de precio según la selección del usuario
     let precioCampo = "";
