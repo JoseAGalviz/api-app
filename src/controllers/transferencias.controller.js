@@ -737,6 +737,7 @@ export const getRenglonesFactura = async (req, res) => {
         f.anulada,
         c.cli_des,
         c.rif,
+        LTRIM(RTRIM(c.nit)) AS nit,
         r.reng_num,
         r.num_doc,
         r.co_art,
@@ -804,6 +805,7 @@ export const getRenglonesFactura = async (req, res) => {
           NULL AS anulada,
           cl.cli_des,
           cl.rif,
+          LTRIM(RTRIM(cl.nit)) AS nit,
           r.reng_num,
           r.num_doc,
           r.co_art,
@@ -835,7 +837,7 @@ export const getRenglonesFactura = async (req, res) => {
     const facturasMap = {};
     recordset.forEach((row) => {
       const cleanRow = cleanStrings(row);
-      const { fact_num, co_cli: rowCoCli, cli_des, campo5, campo6, fec_emis, rif, tasa, tot_bruto } = cleanRow;
+      const { fact_num, co_cli: rowCoCli, cli_des, campo5, campo6, fec_emis, rif, nit: rowNit, tasa, tot_bruto } = cleanRow;
 
       const tot_neto_val = cleanRow.tot_neto != null
         ? Number(Number(cleanRow.tot_neto).toFixed(2))
@@ -851,7 +853,7 @@ export const getRenglonesFactura = async (req, res) => {
           fec_emis,
           tot_neto:       tot_neto_val,
           rif:            rif ?? null,
-          sicm:           null,
+          sicm:           safeStr(rowNit) || null,
           tasa:           tasa != null && tasa !== "" ? Number(Number(tasa).toFixed(2)) : null,
           tot_bruto:      tot_bruto != null ? Number(tot_bruto) : tot_bruto,
           co_us_in:       null,
@@ -939,7 +941,7 @@ export const getRenglonesFactura = async (req, res) => {
         console.error("[batch sicm] Error:", e.message);
       }
     }
-    facturasArray.forEach(f => { f.sicm = sicmMap[safeStr(f.co_cli)] ?? null; });
+    // sicm ya viene del JOIN principal (c.nit / cl.nit)
 
     // ─── BATCH: cod_bar (campo4) para todos los co_art únicos ────────────────
     const uniqueCoArtList = [...new Set(

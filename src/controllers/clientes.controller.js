@@ -311,7 +311,7 @@ export const getVendedores = async (req, res) => {
 export const getClientesBitrix = async (req, res) => {
   const url =
     process.env.BITRIX_MAIN_URL;
-  const filter = { UF_CRM_1634787828: null };
+  const filter = { UF_CRM_1634787828: "-" };
   const select = ["ID", "TITLE", "UF_CRM_1685651349"];
   let start = 0;
   let allCompanies = [];
@@ -330,10 +330,10 @@ export const getClientesBitrix = async (req, res) => {
       if (typeof next === "undefined") break;
       start = next;
     }
-    res.json(allCompanies);
+    if (!res.headersSent) res.json(allCompanies);
   } catch (err) {
     console.error("Error al consultar Bitrix24:", err);
-    res.status(500).json({ error: "Error al consultar Bitrix24" });
+    if (!res.headersSent) res.status(500).json({ error: "Error al consultar Bitrix24" });
   }
 };
 

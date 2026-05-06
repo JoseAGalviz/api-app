@@ -44,10 +44,15 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-connectDB("remote");
-connectDB("local");
-connectDB("negociaciones");
-connectDB("comparador");
+try {
+  await connectDB("remote");
+  await connectDB("local");
+  await connectDB("negociaciones");
+  await connectDB("comparador");
+} catch (err) {
+  console.error('🛑 Error crítico durante la inicialización de las bases de datos:', err.message);
+  // No detenemos el proceso para permitir que el Health Check y el sistema de reconexión intenten recuperarlo
+}
 
 // Health check (público)
 app.get("/health", async (req, res) => {

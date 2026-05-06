@@ -82,19 +82,21 @@ export async function connectDB(configType = 'remote') {
   try {
     if (configType === 'local') {
       mysqlPool = mysql.createPool(localConfig);
-      console.log('Conexión exitosa a MySQL (local)');
+      console.log('✅ Conexión exitosa a MySQL (local)');
     } else if (configType === 'negociaciones') {
       negociacionesPool = mysql.createPool(negociacionesConfig);
-      console.log('Conexión exitosa a MySQL (negociaciones)');
+      console.log('✅ Conexión exitosa a MySQL (negociaciones)');
     } else if (configType === 'comparador') {
       comparadorPool = mysql.createPool(comparadorConfig);
-      console.log('Conexión exitosa a MySQL (comparador)');
+      console.log('✅ Conexión exitosa a MySQL (comparador)');
     } else {
+      console.log('⏳ Intentando conectar a SQL Server (remoto)...');
       await sql.connect(remoteConfig);
-      console.log('Conexión exitosa a SQL Server (remoto)');
+      console.log('✅ Conexión exitosa a SQL Server (remoto)');
     }
   } catch (err) {
-    console.error(`Error de conexión [${configType}]:`, err.message);
+    console.error(`❌ Error de conexión [${configType}]:`, err.message);
+    throw err; // Propagar el error para que el llamador decida qué hacer
   }
 }
 
@@ -125,9 +127,15 @@ export async function checkDBHealth() {
 
 export async function reconnectSQL() {
   try {
-    await sql.close();
-  } catch { /* already closed */ }
-  await connectDB('remote');
+    console.log('🔄 Intentando reconectar a SQL Server...');
+    try {
+      await sql.close();
+    } catch { /* already closed */ }
+    await connectDB('remote');
+    console.log('✅ Reconexión a SQL Server exitosa');
+  } catch (err) {
+    console.error('❌ Falló la reconexión a SQL Server:', err.message);
+  }
 }
 
 export function getMysqlPool() {
