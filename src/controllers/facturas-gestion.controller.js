@@ -449,6 +449,16 @@ export const saveGestiones = async (req, res) => {
       const fechaRegistroVzla = DateTime.now()
         .setZone("America/Caracas")
         .toFormat("yyyy-LL-dd HH:mm:ss");
+
+      // Normalizar fecha del app a zona Venezuela
+      let fechaGestionVzla = fechaRegistroVzla;
+      if (gestion.fecha) {
+        const dtGestion = DateTime.fromISO(String(gestion.fecha), { setZone: true });
+        if (dtGestion.isValid) {
+          fechaGestionVzla = dtGestion.setZone("America/Caracas").toFormat("yyyy-MM-dd HH:mm:ss");
+        }
+      }
+
       await conn.query(
         `INSERT INTO gestiones (
           usuario_id, usuario_nombre, gestion_id, cliente, co_cli, tipos,
@@ -472,10 +482,10 @@ export const saveGestiones = async (req, res) => {
           esNuevoCliente ? gestion.nuevo_cliente?.responsable || null : null,
           esNuevoCliente ? gestion.nuevo_cliente?.telefono || null : null,
           esNuevoCliente ? gestion.nuevo_cliente?.codigoSim || null : null,
-          gestion.fecha,
+          fechaGestionVzla,
           gestion.ubicacion?.lat || null,
           gestion.ubicacion?.lng || null,
-          fechaRegistroVzla, // Aquí va la fecha/hora de Venezuela
+          fechaRegistroVzla,
         ]
       );
       gestionesInsertadas++;
