@@ -363,11 +363,19 @@ const getGestionesPromise = async (req) => {
     const hoyStr = new Date().toISOString().slice(0, 10);
     let query = `
             SELECT 
-                c.co_cli, c.cli_des, c.tipo, c.co_seg, c.co_ven, c.nit, c.desc_glob,
+                c.co_cli, 
+                c.cli_des, 
+                c.tipo, 
+                c.co_seg, 
+                c.co_ven, 
+                c.nit, 
+                c.desc_glob,
                 (SELECT SUM(saldo) FROM factura WHERE co_cli = c.co_cli AND CAST(fec_emis AS DATE) < CAST(fec_venc AS DATE) AND CAST(fec_venc AS DATE) >= @hoy) AS transito,
                 (SELECT SUM(saldo) FROM factura WHERE co_cli = c.co_cli AND CAST(fec_venc AS DATE) < @hoy) AS vencido
             FROM dbo.clientes c
             WHERE 1=1
+                AND c.cli_des NOT LIKE '%NO VENDER%'
+                AND c.cli_des NOT LIKE '%CERRAD%'
         `;
     const params = {};
     const { co_seg } = req.query;
@@ -414,7 +422,7 @@ const getGestionesPromise = async (req) => {
 const getClientesBitrixPromise = async (co_seg) => {
   const url =
     process.env.BITRIX_MAIN_URL;
-  const filter = { UF_CRM_1634787828: null };
+  const filter = { UF_CRM_1634787828: "-" };
   const select = ["ID", "TITLE", "UF_CRM_1685651349"];
   let start = 0;
   let allCompanies = [];
