@@ -374,6 +374,8 @@ const getGestionesPromise = async (req) => {
                 (SELECT SUM(saldo) FROM factura WHERE co_cli = c.co_cli AND CAST(fec_venc AS DATE) < @hoy) AS vencido
             FROM dbo.clientes c
             WHERE 1=1
+                AND c.cli_des NOT LIKE '%NO VENDER%'
+                AND c.cli_des NOT LIKE '%CERRAD%'
         `;
     const params = {};
     const { co_seg } = req.query;
